@@ -9,7 +9,6 @@ authors = [
 dependencies = [
     "numpy>=2.2.5",
     "scipy",
-    "tomli",
     "pandas>=2.3.1",
     "numpy-dynamic-array",
     "synchrophasor @ git+https://github.com/hallvar-h/pypmu",

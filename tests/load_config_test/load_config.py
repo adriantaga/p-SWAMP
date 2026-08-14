@@ -1,4 +1,3 @@
-import tomli
 from pathlib import Path
 from pprint import pprint
 from pswamp.utils.load_config import load_config
