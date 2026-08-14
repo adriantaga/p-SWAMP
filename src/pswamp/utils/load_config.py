@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright Contributors to the p-SWAMP Project.
 
-import tomli
+import tomllib
 from pathlib import Path
 import inspect
 
@@ -75,13 +75,13 @@ def load_config(arg=None):
     project_dir_path = config_file_path.parent
     
     with config_file_path.open("rb") as f:
-        toml_dict = tomli.load(f)
+        toml_dict = tomllib.load(f)
 
     # Add any included toml files to the main one
     if 'include' in toml_dict:
         for include_file in toml_dict['include']:
             with (project_dir_path / include_file).open("rb") as f:
-                toml_dict_include = tomli.load(f)
+                toml_dict_include = tomllib.load(f)
             toml_dict = {**toml_dict, **toml_dict_include}
     
 
