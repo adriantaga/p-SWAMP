@@ -575,7 +575,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.6,<0.116",
     "uvicorn[standard]>=0.34,<0.35",
-    "numpy>=2.2.5", "scipy", "tomli", "pandas>=2.3.1",
+    "numpy>=2.2.5", "scipy", "pandas>=2.3.1",
     "numpy-dynamic-array", "pydantic>=2.12.5",
     "synchrophasor @ git+https://github.com/hallvar-h/pypmu",
 ]
