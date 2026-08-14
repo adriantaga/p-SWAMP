@@ -13,6 +13,9 @@ from pswamp.gui.main_window import run_main_window
 
 
 if __name__ == '__main__':
+    # Required for multiprocessing on Windows when running from a frozen executable. Harmless on Linux.
+    mp.freeze_support()
+
     config = load_config()
 
     if config["streaming"]['type'] == "nqkafka":

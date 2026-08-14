@@ -10,6 +10,9 @@ from pswamp.test_utils.pmu_rtsim_to_kafka import PMUToKafkaPublisher
 from pswamp.utils.load_config import load_config
 
 if __name__ == '__main__':
+    # Required for multiprocessing on Windows when running from a frozen executable. Harmless on Linux.
+    mp.freeze_support()
+
     config = load_config()
     # print(config["streaming"])
 
