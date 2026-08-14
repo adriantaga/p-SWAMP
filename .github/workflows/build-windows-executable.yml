@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  attestations: write
+  id-token: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -31,6 +36,11 @@ jobs:
             --add-data "examples/nordic44_rtsim/data;data" `
             --add-data "examples/nordic44_rtsim/config.toml;." `
             examples/nordic44_rtsim/run_case.py
+
+      - name: Attest executable provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/run_case.exe
 
       - name: Upload executable
         uses: actions/upload-artifact@v5
