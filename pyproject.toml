@@ -47,3 +47,8 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name="pswamp"
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.22.0",
+]

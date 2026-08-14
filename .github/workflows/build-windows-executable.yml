@@ -1,0 +1,41 @@
+name: Build Windows executable
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --extra full
+
+      - name: Build executable
+        shell: pwsh
+        run: |
+          uv run pyinstaller --clean --onefile `
+            --add-data "src/pswamp;pswamp" `
+            --add-data "examples/nordic44_rtsim/data;data" `
+            --add-data "examples/nordic44_rtsim/config.toml;." `
+            examples/nordic44_rtsim/run_case.py
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: nordic44_rtsim-run_case-windows
+          path: dist/run_case.exe
+          compression-level: 0
+          if-no-files-found: error
