@@ -136,6 +136,9 @@ def run_rtsim(**pmu_kwargs):
 
 
 if __name__ == '__main__':
+    # Required for multiprocessing on Windows when running from a frozen executable. Harmless on Linux.
+    mp.freeze_support()
+
     from pswamp import load_config
     config = load_config('config.toml')
     run_rtsim(pmu_kwargs=dict(ip=config['pmus']['ip'], port=config['pmus']['port']))
