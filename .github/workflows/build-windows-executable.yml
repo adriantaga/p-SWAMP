@@ -35,7 +35,7 @@ jobs:
       - name: Build executable
         shell: pwsh
         run: |
-          uv run pyinstaller --clean --onefile `
+          uv run pyinstaller --clean --onefile --name nordic44_rtsim-run_case-windows `
             --add-data "src/pswamp;pswamp" `
             --add-data "examples/nordic44_rtsim/data;data" `
             --add-data "examples/nordic44_rtsim/config.toml;." `
@@ -44,13 +44,13 @@ jobs:
       - name: Attest executable provenance
         uses: actions/attest-build-provenance@v3
         with:
-          subject-path: dist/run_case.exe
+          subject-path: dist/nordic44_rtsim-run_case-windows.exe
 
       - name: Upload executable
         uses: actions/upload-artifact@v7
         with:
-          name: nordic44_rtsim-run_case-windows-ci-artifact
-          path: dist/run_case.exe
+          name: nordic44_rtsim-run_case-windows.zip
+          path: dist/nordic44_rtsim-run_case-windows.exe
           compression-level: 0
           if-no-files-found: error
 
@@ -58,4 +58,4 @@ jobs:
         if: github.event_name == 'release' && github.event.action == 'published'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "dist/run_case.exe#nordic44_rtsim-run_case-windows.exe" --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/nordic44_rtsim-run_case-windows.exe --clobber
