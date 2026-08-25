@@ -6,7 +6,7 @@ and dependencies if you want a full development setup.
 
 ## Option 1: Run the ready-made executable
 
-1. Open the [p-SWAMP releases page](https://github.com/p-swamp/p-SWAMP/releases)
+1. Open this p-SWAMP [releases page](https://github.com/adriantaga/p-SWAMP/releases)
    and download `nordic44_rtsim-run_case-windows.exe` from the latest release's
    **Assets** section.
 
