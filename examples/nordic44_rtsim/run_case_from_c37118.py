@@ -1,20 +1,19 @@
-from pswamp.utils.load_config import load_config
+import multiprocessing as mp
+import time
+
 from nqkafka.utils import stop_server as stop_nqkafka_server
 
-import time
 from pswamp.gui.main_window import run_main_window
-import multiprocessing as mp
-# from data.coords import n44_coordinates
-import pswamp.test_utils.runners as runners
-
+from pswamp.test_utils import runners
+from pswamp.utils.load_config import load_config
 
 if __name__ == '__main__':
     # Required for multiprocessing on Windows when running from a frozen executable. Harmless on Linux.
     mp.freeze_support()
 
     config = load_config('config.toml')
-    
-    if config["streaming"]['use_nqkafka']:
+
+    if config["streaming"]["type"] == "nqkafka":
         runners.run_nqkafka_server(config)
         print('Started NQKafka Server')
     
@@ -33,5 +32,5 @@ if __name__ == '__main__':
     
     run_main_window(config)
 
-    if config["streaming"]['use_nqkafka']:
+    if config["streaming"]["type"] == "nqkafka":
         stop_nqkafka_server(config["streaming"]['bootstrap_servers'])
