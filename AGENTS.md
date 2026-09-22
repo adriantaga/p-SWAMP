@@ -1107,10 +1107,14 @@ mind when editing that script:
   the pull request's base and head, using
   `.github/dependency-review-config.yml`; it is not an all-branch push scan.
   Manual dispatch can compare a selected branch with a configurable base ref
-  after the workflow exists on the default branch. `unit-tests` runs the Python
-  suites through their runner scripts (`run-python-server-tests.sh`; the desktop
-  `run-core-python-tests.sh` step is commented out with a TODO until its
-  missing-module failure is resolved), so `error_check.sh` stays strictly static.
+  after the workflow exists on the default branch. It requires **Dependency
+  Graph** to be enabled in repository settings: GitHub parses the npm locks and
+  runs its uv graph job for the two `uv.lock` files; the action consumes those
+  snapshots rather than building a graph itself. The audited license baseline is
+  in `doc/dependency-license-inventory.md`. `unit-tests` runs the Python suites
+  through their runner scripts (`run-python-server-tests.sh`; the desktop
+  `run-core-python-tests.sh` step is commented out with a TODO until its missing-
+  module failure is resolved), so `error_check.sh` stays strictly static.
 - **`build-container.yml`** runs on every push to `main` and from the Actions
   tab: it builds the image with `push: false`, starts it, checks `/healthz`
   answers, and discards it. **It publishes nothing.** It runs no gates of its

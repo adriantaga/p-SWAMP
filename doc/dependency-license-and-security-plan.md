@@ -59,10 +59,12 @@ retention and scheduled artifact scanning need a separate implementation plan.
 
 ### 2. Establish and review the baseline
 
-- Inventory the server runtime, browser bundle, build/dev tools, desktop base,
-  desktop `[full]` extra and Debian packages in the image recipe.
-- Include transitive packages, Git dependencies and dependencies whose licenses
-  cannot be identified.
+- The application dependency baseline is recorded in
+  `doc/dependency-license-inventory.md`, including the server runtime, browser
+  bundle, build/dev tools, desktop base, desktop `[full]` extra, transitive
+  packages and commit-pinned Git dependencies.
+- Inventory Debian packages in the image recipe separately; Dependency Review
+  does not inspect an image filesystem.
 - For each item, record whether it is distributed in `p-swamp`, sent to the
   browser, build-only, optional, or separately deployed.
 - Review the current MPL-2.0 npm packages and desktop dependencies such as
@@ -70,11 +72,30 @@ retention and scheduled artifact scanning need a separate implementation plan.
 - Record exceptions by package, version or range, scope, rationale, approver and
   review date.
 
-### 3. Define the license policy
+### 3. Enable and verify Dependency Graph
 
-- The initial explicit permissive SPDX allowlist is stored in
-  `.github/dependency-review-config.yml`. An allowlist is preferable to trying
-  to enumerate every copyleft or non-standard license that must be denied.
+- Enable **Dependency Graph** under repository **Settings > Advanced Security**.
+  This is a GitHub repository setting and cannot be enabled by a committed
+  workflow with read-only permissions.
+- Dependency Review consumes graph snapshots; it does not construct the graph.
+  Without this setting the action cannot compare the base and head revisions.
+- GitHub parses both npm lockfiles directly. Current GitHub/Dependabot supports
+  uv dependency graph jobs for `uv.lock`; the action retries briefly if those
+  snapshots are still being generated.
+- In the first pull request, inspect **Insights > Dependency graph** and the
+  Dependency Review job summary. Confirm that both uv projects, both npm locks,
+  transitive packages and commit-pinned Git dependencies appear.
+- Add a dependency-submission workflow only if that verification exposes a real
+  coverage gap. Running a second graph generator preemptively would add CI time,
+  permissions and snapshot-ordering failure modes without improving supported
+  manifests.
+
+### 4. Define the license policy
+
+- The evidence-backed permissive SPDX allowlist is stored in
+  `.github/dependency-review-config.yml`; its baseline is documented in
+  `doc/dependency-license-inventory.md`. An allowlist is preferable to trying to
+  enumerate every copyleft or non-standard license that must be denied.
 - Decide explicitly whether MPL and LGPL are accepted in each scope.
 - Require an architectural and legal exception for GPL or AGPL application
   dependencies.
@@ -85,7 +106,7 @@ retention and scheduled artifact scanning need a separate implementation plan.
   distinction between runtime/browser and optional/development tooling needs
   explicit package exceptions or a separate policy check.
 
-### 4. Priority pull-request gate (implemented)
+### 5. Priority pull-request gate (implemented)
 
 - `dependency-review` runs in `.github/workflows/quality-checks.yml` using
   `actions/dependency-review-action@v5` with `contents: read` only.
@@ -106,7 +127,7 @@ retention and scheduled artifact scanning need a separate implementation plan.
 - Require the `dependency-review` job in branch protection and document the
   fourth required job in `AGENTS.md`.
 
-### 5. Enable report-only Dependabot
+### 6. Enable report-only Dependabot
 
 - Enable **Dependency Graph** and **Dependabot Alerts** in repository settings.
 - Leave **Dependabot Security Updates** disabled.
@@ -122,7 +143,7 @@ review its report and open a normal pull request. Dependency Review then checks
 that the proposed replacement did not introduce a prohibited license or another
 known vulnerability.
 
-### 6. Add lower-priority Trivy coverage
+### 7. Add lower-priority Trivy coverage
 
 - Scan `p-swamp:smoketest` after the existing CI image build so the artifact is
   not built twice.
@@ -139,13 +160,14 @@ known vulnerability.
 - [x] Add Dependency Review configuration and its CI job.
 - [x] Document PR and manual branch-comparison testing.
 - [ ] Correct MIT package metadata to Apache-2.0.
-- [ ] Inventory dependencies and licenses in every defined scope.
+- [x] Inventory application dependencies and licenses in every defined scope.
 - [ ] Inventory the packages in the final container image.
 - [ ] Review existing MPL, LGPL and unknown-license findings.
-- [ ] Agree on the SPDX allowlist and exception record format.
+- [x] Ground the initial SPDX allowlist in the dependency inventory.
 - [ ] Verify uv, npm, path and transitive dependency coverage in a test PR.
 - [ ] Require `dependency-review` in branch protection.
-- [ ] Enable Dependency Graph and Dependabot Alerts only.
+- [ ] Enable and verify Dependency Graph.
+- [ ] Enable Dependabot Alerts only.
 - [ ] Confirm Security Updates and Version Updates remain disabled.
 - [ ] Document the human remediation path through
       `scripts/update-dependencies.sh`.

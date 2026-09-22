@@ -40,6 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Prerequisite: Settings > Advanced Security > Dependency Graph must be
+      # enabled. GitHub parses npm locks directly and graphs uv locks through
+      # its Dependabot graph job; this action consumes those snapshots.
       # A pull request supplies its own base and head revisions.
       - name: Dependency Review
         if: github.event_name == 'pull_request'
