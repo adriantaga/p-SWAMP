@@ -1101,9 +1101,14 @@ mind when editing that script:
 **Two workflows under `.github/workflows/`, one per concern:**
 
 - **`quality-checks.yml`** runs on every pull request (and from the Actions tab):
-  three independent jobs, `static-errorcheck`, `unit-tests` and
-  `e2e-smoke-test`. It publishes nothing. `unit-tests` runs the Python suites
-  through their runner scripts (`run-python-server-tests.sh`; the desktop
+  four independent merge gates, `dependency-review`, `static-errorcheck`,
+  `unit-tests` and `e2e-smoke-test`, plus the initial `playwright-e2e` job. It
+  publishes nothing. `dependency-review` checks only dependency changes between
+  the pull request's base and head, using
+  `.github/dependency-review-config.yml`; it is not an all-branch push scan.
+  Manual dispatch can compare a selected branch with a configurable base ref
+  after the workflow exists on the default branch. `unit-tests` runs the Python
+  suites through their runner scripts (`run-python-server-tests.sh`; the desktop
   `run-core-python-tests.sh` step is commented out with a TODO until its
   missing-module failure is resolved), so `error_check.sh` stays strictly static.
 - **`build-container.yml`** runs on every push to `main` and from the Actions
@@ -1137,12 +1142,13 @@ if hosting ever becomes possible, that is a decision for an ADR.
 
 **Blocking a merge on the checks is a repo setting, not something a workflow
 can express.** Settings → Branches → branch protection for `main` → "Require
-status checks to pass", selecting **`static-errorcheck`**, **`unit-tests`** and
-**`e2e-smoke-test`**. Those rules match on the *job* name, not the workflow's, so
-renaming a job silently un-requires it there — rename the job and the protection
-rule together. (The jobs used to live in a single `ci-pipeline.yml`, and before
-that the check job was called `check`; if protection was configured against
-either, it needs re-selecting.)
+status checks to pass", selecting **`dependency-review`**,
+**`static-errorcheck`**, **`unit-tests`** and **`e2e-smoke-test`**. Those rules
+match on the *job* name, not the workflow's, so renaming a job silently
+un-requires it there — rename the job and the protection rule together. (The
+jobs used to live in a single `ci-pipeline.yml`, and before that the check job
+was called `check`; if protection was configured against either, it needs
+re-selecting.)
 
 Two things that pipeline learned the hard way, and that any future one on those
 runners will hit again:
