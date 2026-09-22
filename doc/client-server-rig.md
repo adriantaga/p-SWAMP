@@ -58,7 +58,8 @@ scripts/      the stable developer interface — start the server, start the web
               client, run in minikube, etc. Call these rather than the underlying
               docker/npm/uv commands; they stay the same if the tooling changes.
 .github/      CI: workflows/quality-checks.yml (checks + tests on pull requests) and
-              workflows/build-and-publish.yml (push the container image to GHCR on main)
+              workflows/build-container.yml (checks the image still builds on main;
+              publishes nothing)
 .githooks/    pre-push hook running scripts/error_check.sh. Opt in per clone with
               `git config core.hooksPath .githooks`.
 ```
@@ -163,14 +164,28 @@ Build pipeline (CI)
 ==
 
 Two workflows under `.github/workflows/`: `quality-checks.yml` gates pull
-requests, and `build-and-publish.yml` publishes every change to `main` (and any
-`v*` tag) to **GHCR** — `ghcr.io/<owner>/p-swamp`.
+requests, and `build-container.yml` checks on every change to `main` that the
+container image still builds and starts.
+
+**CI publishes no container image, and nothing else here does either.** This
+repo cannot host binaries, so there is no registry to pull from. The `Dockerfile`
+is an **example** of how to containerise the stack — the same one the compose,
+minikube and CI paths build from — and a TSO or any other downstream deployment
+builds its own image from it, into its own registry:
 
 ```
-docker pull ghcr.io/<owner>/p-swamp:latest
+git clone <this repo> && cd p-SWAMP
+docker build --build-arg GIT_SHA="$(git rev-parse HEAD)" -t <registry>/p-swamp:<tag> .
+docker push <registry>/p-swamp:<tag>
 ```
 
-This is a public container build, that TSO can mirror/pull into their own infra.
+The build context is the repo root (the image holds both the web client and the
+desktop package's `src/`), and `GIT_SHA` is what the client footer shows on a
+deployed origin. Tag the image with the commit it was built from rather than a
+moving tag, so a deployment can be pinned and a rollout is triggered by a change
+of image. `scripts/start-pswamp-in-local-minikube-cluster.sh` is the local
+rehearsal of that path: it builds the same Dockerfile into minikube and applies
+`k8s/p-swamp-local.yaml`.
 
 Client-server architecture: many pages, one app
 ==

@@ -1,0 +1,94 @@
+# Check that the container image (web client + server, one Dockerfile) still
+# builds from main. Runs on every change to main and from the Actions tab.
+#
+# THIS PUBLISHES NOTHING. This repo cannot host binaries, so no image is pushed
+# to any registry and the build is discarded when the job ends. The Dockerfile
+# is an EXAMPLE of how to containerise the stack: a downstream deployment builds
+# its own image from this repo, with its own tag and its own registry:
+#
+#   git clone <this repo> && cd p-SWAMP
+#   docker build --build-arg GIT_SHA="$(git rev-parse HEAD)" -t <registry>/p-swamp:<tag> .
+#   docker push <registry>/p-swamp:<tag>
+#
+# What this job adds over quality-checks.yml (which already builds the image for
+# its smoke test on every pull request) is that the build is exercised on the
+# merged result, with the GIT_SHA build arg threaded in as a deployment would.
+#
+# No quality gates here: main is protected, so every commit on it already passed
+# quality-checks.yml on its pull request.
+name: build-container
+
+on:
+  push:
+    branches: [main] # Main is protected, but this runs on PR merges as well (github pushes to main)
+  workflow_dispatch:
+
+# Finish every run: a build that broke on main should show up as a red run for
+# that commit rather than be cancelled by the next one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-container:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # read-only: nothing is pushed anywhere
+    steps:
+      - uses: actions/checkout@v5
+
+      # buildx for the layer cache; no QEMU, the image is amd64 only.
+      - uses: docker/setup-buildx-action@v4
+
+      # Context is the repo root: the web-build stage needs app/client-web/ and
+      # the runtime stage needs root src/. amd64 only: that is what a downstream
+      # cluster would run, and dev boxes build their own image via compose/minikube.
+      #
+      # `push: false` + `load: true`: the image lands in the runner's own docker
+      # daemon and nowhere else, and is gone when the runner is.
+      - name: Build the image (not published)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: p-swamp:ci
+          # Exposed to Vite as VITE_GIT_SHA; the footer shows it on deployed origins.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          # Layer cache in GitHub's cache backend, shared with quality-checks.yml.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The image must start and answer /healthz, the same probe k8s and compose
+      # use. `docker run` with the image's own CMD, not compose, which overrides
+      # the command with `uvicorn --reload` for local dev.
+      - name: Start the built image
+        run: |
+          docker run -d --name p-swamp-ci -p 8000:8000 -e HOST=0.0.0.0 -e PORT=8000 p-swamp:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/healthz >/dev/null; then
+              echo "healthz answered after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the image started but /healthz never answered"; exit 1
+
+      - name: Server log
+        if: always()
+        run: docker logs p-swamp-ci || true
+
+      - name: Stop the built image
+        if: always()
+        run: docker rm -f p-swamp-ci || true
+
+      - name: Summary
+        run: |
+          {
+            echo "### Container build OK — nothing published"
+            echo
+            echo "The image built from \`${{ github.sha }}\` and answered \`/healthz\`."
+            echo "This repo hosts no binaries: build your own image from the Dockerfile"
+            echo "(see the comment at the top of this workflow)."
+          } >> "$GITHUB_STEP_SUMMARY"
