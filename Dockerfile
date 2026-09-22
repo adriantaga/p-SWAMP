@@ -23,7 +23,8 @@ RUN npm ci
 # *after* `npm ci` so a changing SHA doesn't bust that cached layer; the source
 # COPY + build below re-run every commit anyway. Empty in a plain `docker build`
 # with no --build-arg (compose/minikube dev) — fine, the footer only shows it off
-# localhost. CI's build-and-push passes github.sha; see ci-pipeline.yml.
+# localhost. CI's build-container.yml passes github.sha, and a downstream
+# deployment building its own image should pass `git rev-parse HEAD`.
 ARG GIT_SHA=""
 ENV VITE_GIT_SHA=$GIT_SHA
 COPY app/client-web/ ./

@@ -1,5 +1,6 @@
-# Quality gates for pull requests. Publishes nothing; the container image is
-# built and pushed by build-and-publish.yml on main.
+# Quality gates for pull requests. Publishes nothing — and neither does anything
+# else in this repo: build-container.yml only checks that the image still builds
+# on main. Downstream deployments build their own image from the Dockerfile.
 #
 # Three independent jobs:
 #   static-errorcheck — scripts/error_check.sh, the same gate .githooks/pre-push runs
@@ -91,7 +92,7 @@ jobs:
           cache-dependency-glob: app/server-python/uv.lock
       - run: uv python install 3.11
 
-      # Shares the type=gha layer cache with build-and-publish.yml, so this build
+      # Shares the type=gha layer cache with build-container.yml, so this build
       # is mostly a cache hit. `load: true` puts the image in the runner's daemon.
       - uses: docker/setup-buildx-action@v4
       - name: Build the image under test
