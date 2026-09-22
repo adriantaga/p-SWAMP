@@ -901,6 +901,10 @@ failure to a slower place.
 
 Dependency upgrades (all four manifests + all three lockfiles, in one pass):
 
+The planned license-policy, report-only Dependabot and container-compliance work
+is recorded in `doc/dependency-license-and-security-plan.md`. Read it before
+adding dependency scanning or changing this update workflow.
+
 ```
 ./scripts/update-dependencies.sh          # TARGET=minor for no major jumps; NO_CHECK=1 skips the error_check.sh run
 ```
