@@ -901,6 +901,10 @@ failure to a slower place.
 
 Dependency upgrades (all four manifests + all three lockfiles, in one pass):
 
+The planned license-policy, report-only Dependabot and container-compliance work
+is recorded in `doc/dependency-license-and-security-plan.md`. Read it before
+adding dependency scanning or changing this update workflow.
+
 ```
 ./scripts/update-dependencies.sh          # TARGET=minor for no major jumps; NO_CHECK=1 skips the error_check.sh run
 ```
@@ -1097,11 +1101,20 @@ mind when editing that script:
 **Two workflows under `.github/workflows/`, one per concern:**
 
 - **`quality-checks.yml`** runs on every pull request (and from the Actions tab):
-  three independent jobs, `static-errorcheck`, `unit-tests` and
-  `e2e-smoke-test`. It publishes nothing. `unit-tests` runs the Python suites
+  four independent merge gates, `dependency-review`, `static-errorcheck`,
+  `unit-tests` and `e2e-smoke-test`, plus the initial `playwright-e2e` job. It
+  publishes nothing. `dependency-review` checks only dependency changes between
+  the pull request's base and head, using
+  `.github/dependency-review-config.yml`; it is not an all-branch push scan.
+  Manual dispatch can compare a selected branch with a configurable base ref
+  after the workflow exists on the default branch. It requires **Dependency
+  Graph** to be enabled in repository settings: GitHub parses the npm locks and
+  runs its uv graph job for the two `uv.lock` files; the action consumes those
+  snapshots rather than building a graph itself. The audited license baseline is
+  in `doc/dependency-license-inventory.md`. `unit-tests` runs the Python suites
   through their runner scripts (`run-python-server-tests.sh`; the desktop
-  `run-core-python-tests.sh` step is commented out with a TODO until its
-  missing-module failure is resolved), so `error_check.sh` stays strictly static.
+  `run-core-python-tests.sh` step is commented out with a TODO until its missing-
+  module failure is resolved), so `error_check.sh` stays strictly static.
 - **`build-container.yml`** runs on every push to `main` and from the Actions
   tab: it builds the image with `push: false`, starts it, checks `/healthz`
   answers, and discards it. **It publishes nothing.** It runs no gates of its
@@ -1133,12 +1146,13 @@ if hosting ever becomes possible, that is a decision for an ADR.
 
 **Blocking a merge on the checks is a repo setting, not something a workflow
 can express.** Settings → Branches → branch protection for `main` → "Require
-status checks to pass", selecting **`static-errorcheck`**, **`unit-tests`** and
-**`e2e-smoke-test`**. Those rules match on the *job* name, not the workflow's, so
-renaming a job silently un-requires it there — rename the job and the protection
-rule together. (The jobs used to live in a single `ci-pipeline.yml`, and before
-that the check job was called `check`; if protection was configured against
-either, it needs re-selecting.)
+status checks to pass", selecting **`dependency-review`**,
+**`static-errorcheck`**, **`unit-tests`** and **`e2e-smoke-test`**. Those rules
+match on the *job* name, not the workflow's, so renaming a job silently
+un-requires it there — rename the job and the protection rule together. (The
+jobs used to live in a single `ci-pipeline.yml`, and before that the check job
+was called `check`; if protection was configured against either, it needs
+re-selecting.)
 
 Two things that pipeline learned the hard way, and that any future one on those
 runners will hit again:
