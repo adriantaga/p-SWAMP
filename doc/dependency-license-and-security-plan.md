@@ -3,6 +3,9 @@
 Status: the Dependency Review policy and CI job are implemented. Baseline review,
 repository settings and the later work below remain open.
 
+For day-to-day setup, results and remediation guidance, see
+[`dependency-license-and-vulnerability-checks.md`](dependency-license-and-vulnerability-checks.md).
+
 This is engineering guidance, not legal advice. A qualified reviewer should
 approve the license policy and any exception involving GPL, LGPL or AGPL code.
 
@@ -164,12 +167,12 @@ known vulnerability.
 - [ ] Inventory the packages in the final container image.
 - [ ] Review existing MPL, LGPL and unknown-license findings.
 - [x] Ground the initial SPDX allowlist in the dependency inventory.
-- [ ] Verify uv, npm, path and transitive dependency coverage in a test PR.
-- [ ] Require `dependency-review` in branch protection.
-- [ ] Enable and verify Dependency Graph.
-- [ ] Enable Dependabot Alerts only.
-- [ ] Confirm Security Updates and Version Updates remain disabled.
-- [ ] Document the human remediation path through
+- [x] Verify uv, npm, path and transitive dependency coverage in a test PR.
+- [x] Require `dependency-review` in branch protection.
+- [x] Enable and verify Dependency Graph.
+- [x] Enable Dependabot Alerts only.
+- [x] Confirm Security Updates and Version Updates remain disabled.
+- [x] Document the human remediation path through
       `scripts/update-dependencies.sh`.
 - [ ] Obtain legal review of GPL/LGPL/AGPL policy and current findings.
 - [ ] Add a non-blocking Trivy image scan later.
