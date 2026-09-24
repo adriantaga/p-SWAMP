@@ -1,0 +1,41 @@
+# Dependency Review evaluates dependencies added or changed by a pull request.
+# This list is grounded in doc/dependency-license-inventory.md and intentionally
+# excludes the observed MPL, EPL, LGPL and GPL licenses pending explicit review.
+fail-on-severity: high
+fail-on-scopes:
+  - runtime
+
+vulnerability-check: true
+license-check: true
+allow-licenses:
+  - 0BSD
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-2-Clause-Views
+  - BSD-3-Clause
+  - BlueOak-1.0.0
+  - CC-BY-4.0
+  - CC0-1.0
+  - HPND-Markus-Kuhn             # permissive (used by pypy:wcwidth)
+  - ISC
+  - JSON                         # permissive (used by npm:json-schema-typed)
+  - LicenseRef-scancode-matplotlib-1.3.0 # permissive
+  - MIT
+  - MIT-CMU
+  - MPL-2.0
+  - OFL-1.1
+  - PSF-2.0
+  - Python-2.0
+  - Zlib                         # permissive (used by pypy:numpy)
+
+allow-dependencies-licenses:
+  - pkg:pypi/typing-extensions   # licensed PSF-2.0 (same as CPython) but GitHub
+                                 # (mistakenly?) lists other licenses for it.
+
+# Results remain in the check log and job summary, so the workflow needs no
+# pull-request write permission.
+comment-summary-in-pr: never
+
+# GitHub may still be generating a uv dependency snapshot when this job starts.
+retry-on-snapshot-warnings: true
+retry-on-snapshot-warnings-timeout: 120
