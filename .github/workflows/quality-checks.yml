@@ -2,13 +2,16 @@
 # else in this repo: build-container.yml only checks that the image still builds
 # on main. Downstream deployments build their own image from the Dockerfile.
 #
-# Three independent jobs:
+# Four independent merge gates:
+#   dependency-review — rejects unsafe dependency changes in this pull request
 #   static-errorcheck — scripts/error_check.sh, the same gate .githooks/pre-push runs
 #   unit-tests        — the Python test suites via their runner scripts
 #   e2e-smoke-test    — builds the image, runs it, drives the Reference example
+# The provisional playwright-e2e job is present too, but is not yet a required
+# branch-protection check.
 #
 # Making these block a merge is a repo setting: Settings → Branches → protection
-# for main → "Require status checks to pass", selecting the three JOB names above.
+# for main → "Require status checks to pass", selecting the four JOB names above.
 # Renaming a job here silently un-requires it there — rename both together.
 #
 # No paths filter on pull_request, on purpose: GitHub scores a required check
@@ -18,6 +21,11 @@ name: quality-checks
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Git ref to compare the selected branch against
+        required: true
+        default: main
 
 # A new push to the same PR cancels the previous run.
 concurrency:
@@ -25,6 +33,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      # Prerequisite: Settings > Advanced Security > Dependency Graph must be
+      # enabled. GitHub parses npm locks directly and graphs uv locks through
+      # its Dependabot graph job; this action consumes those snapshots.
+      # A pull request supplies its own base and head revisions.
+      - name: Dependency Review
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v5
+        with:
+          config-file: ./.github/dependency-review-config.yml
+
+      # After this workflow exists on the default branch, manual dispatch can
+      # compare any branch selected in the Actions UI with base_ref.
+      - name: Dependency Review (manual branch comparison)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/dependency-review-action@v5
+        with:
+          config-file: ./.github/dependency-review-config.yml
+          base-ref: ${{ inputs.base_ref }}
+          head-ref: ${{ github.ref }}
+
   static-errorcheck:
     runs-on: ubuntu-latest
     steps:
