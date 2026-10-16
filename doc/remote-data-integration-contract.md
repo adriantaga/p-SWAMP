@@ -14,8 +14,8 @@ that the deployment runs in front of its own store. The service answers two
 requests:
 
 - **coverage**: what time range it holds;
-- **query**: the records in a range, streamed back as the response body, one
-  JSON line per record, closed by one terminal line.
+- **query**: the records in a range, at most `limit` of them, streamed back
+  as the response body, one JSON line per record, closed by one terminal line.
 
 The connection that asks is the one that answers. Closing it cancels the
 query. p-SWAMP never sees the store, its schema or its location.
@@ -70,12 +70,28 @@ UTC (`Z`). Ranges are half-open: `[start, end)`.
 `POST /v1/queries`, `Content-Type: application/json`:
 
 ```json
-{"version": "v1", "query_id": "9f1c…", "model": "pmu.frame",
- "start": "2026-01-01T00:00:01Z", "end": "2026-01-01T00:00:02Z"}
+{"version": "v1", "query_id": "9f1c….1", "model": "pmu.frame",
+ "start": "2026-01-01T00:00:01Z", "end": "2026-01-01T00:00:02Z", "limit": 30000}
 ```
 
 - `start` and `end` may be `null`, which means open.
+- `limit` is the most records to send: the first `limit` in `[start, end)`,
+  then the `end` line. `null` or absent means all of them. Send no more than
+  it says; a client stops reading at `limit` and closes the connection.
 - `query_id` is for matching the two sides' logs; it is not echoed.
+
+### Pages
+
+The client reads a long range as pages. It asks for `limit` records from
+`start`; when a page holds `limit` of them, it asks again from one
+microsecond after the last one's timestamp, until a page comes back short or
+the range ends. Each page is its own query, with its own `query_id`
+(`<id>.<n>`).
+
+- A page is bounded by records, not by time, so a gap of weeks costs one
+  query and a range of months is many small ones.
+- **Timestamps are unique per model.** Records sharing the last timestamp of
+  a full page would be lost at the page boundary.
 - An unknown model is `404`, a malformed body `422`. Refuse whatever you can
   refuse *before* the first line: once the body starts, the status is sent.
 
@@ -96,7 +112,7 @@ an empty answer, and the client fails the stream.
 **Let the connection pace you.** Stream records as you read them, rather than
 building the whole answer first. The client reads a line only when its player
 wants the next frame, so a replay at real time holds the connection open for
-the length of the range, and TCP backpressure paces your reads.
+the length of the page, and TCP backpressure paces your reads.
 
 **Cancellation is closing the connection.** The client closes it on a seek,
 or when the viewer leaves. Stop reading the store when the write fails. There
@@ -144,11 +160,13 @@ PMU_TEST_STREAMER_SOURCES=sample:sample-replay,live:live-synthetic,remote:remote
 REMOTE_URL=http://remote-data:8100      # required
 REMOTE_TIMEOUT=30                       # seconds; default 30
 REMOTE_COVERAGE_TIMEOUT=10              # seconds; default 10
+REMOTE_PAGE=30000                       # records per query; default 30000
 ```
 
 - `REMOTE_TIMEOUT` bounds the wait for a response to start, and for each next
   line while the client is reading. A paused replay reads nothing and is not
   timed out.
+- `REMOTE_PAGE` is each query's `limit`: 30000 is ten minutes at 50 Hz.
 - `REMOTE_COVERAGE_TIMEOUT` bounds `GET /v1/coverage`, which a seek and a
   switch to the source wait on. A switch away from a source that hangs does
   not wait: it stops the command in progress.
@@ -178,6 +196,6 @@ class TestOurService(SourceConformance):
 ## Not settled yet
 
 - Authentication and TLS between p-SWAMP and the service.
-- Limits: the largest range per query, concurrent queries, rate.
+- Limits: concurrent queries, rate. (The size of a query is `limit`.)
 - Models beyond `pmu.frame`, and how a schema change is versioned and agreed.
 - Readiness of the store behind the service (`/healthz` is the process only).

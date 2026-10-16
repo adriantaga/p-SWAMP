@@ -158,12 +158,12 @@ under "The server data architecture"):
   `tools/tests/test_tools_layering.py` checks every `modules/*/pyproject.toml`
   for that, for the folder's contents and for the entry point.
 - **Sources are modules too**, in the code as well as on disk: `sample-replay`,
-  `live-synthetic` and `remote-history` are projects under `modules/`, each a
-  `SourceModule`, which is a `Module` subclass (a history that mixes in
-  `Playable` can be replayed paced and sought). They have no inputs and produce
-  `PmuFrame`, and are found by their entry point like any module. What sets them
-  apart is where they run: in their run's process, never in a `ModuleHost`
-  (ADR-006).
+  `live-synthetic`, `remote-history` and `synthetic-history` are projects under
+  `modules/`, each a `SourceModule`, which is a `Module` subclass (a history
+  that mixes in `Playable` can be replayed paced and sought). They have no
+  inputs and produce `PmuFrame`, and are found by their entry point like any
+  module. What sets them apart is where they run: in their run's process,
+  never in a `ModuleHost` (ADR-006).
 - **`pipelines/<app>.toml` is one file per app**: data, not code, and not a
   project. It names the app's modules and sources by their `pswamp.modules`
   entry points, and its enrichment. `uv run pswamp pipelines validate` checks

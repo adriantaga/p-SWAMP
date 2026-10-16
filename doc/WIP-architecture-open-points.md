@@ -145,7 +145,8 @@ which is what `enrich.py` does. What says otherwise:
 `doc/remote-data-integration-contract.md` ("leave `cimReferenceId` out").
 
 **D12. Remote data, later.** The remote contract's "Not settled yet" list:
-authentication and TLS, limits, and models beyond `pmu.frame`. Recommended:
+authentication and TLS, limits on concurrent queries and rate (a query's
+size is its `limit`, a page), and models beyond `pmu.frame`. Recommended:
 name the settings now (`<APP>_REMOTE_TOKEN`, a CA bundle) under D2, so
 adding them is additive. Live data over a remote service is a second
 contract, not this one.
@@ -193,7 +194,7 @@ the module contract for the next module.
 
 | # | Issue | Settled by |
 |---|---|---|
-| 26 | Playback offsets and steps are unbounded: 500s, or `OverflowError` on the tray | — |
+| 26 | Playback steps are unbounded: a large step back is an `OverflowError` on the tray | — |
 | 20 | `MALLOC_ARENA_MAX=2` is set in the Dockerfile only; AGENTS.md does not mention it | — |
 | 30 | A page closed during a push logs an unhandled `WebSocketDisconnect` | — |
 | 28 | A run keeps playing for 300 s after its last socket closes | — |
@@ -445,20 +446,13 @@ unclosed.**
 
 ### The web API and pages
 
-**26. Playback offsets and steps are unbounded.**
-- A seek whose end is not after its start answers 500, not 422. `SeekBody`
-  (`app/server-python/src/pmu_test_streamer/api.py`) lacks the check
-  `SeekCommand` has (`models/src/pswamp_models/player/commands.py`), so the
-  `ValidationError` is raised inside the handler.
+**26. Playback steps are unbounded.**
 - A step of `n = -10**15` answers 200 and reaches the tray as
-  `OverflowError: date value out of range`: `StepBody.n` has no bound, and
-  `Playable` adds the step to a datetime.
-- `offset_s=1e15` answers 500, an `OverflowError` from `Playable.validate`;
-  `end_offset_s=1e15` answers 200, then the tray reports the same
-  `OverflowError`. Neither `SeekBody` nor `SeekCommand` bounds the offsets.
-  A huge positive step is harmless: it plays to the end.
-- Suggestion: bound both offsets and `StepBody.n` in the API, and give
-  `SeekBody` `SeekCommand`'s check, so a value out of range is a 422.
+  `OverflowError: date value out of range`: `StepBody.n`
+  (`app/server-python/src/pmu_test_streamer/api.py`) has no bound, and
+  `Playable._pl_step` subtracts `n` frame intervals from the cursor.
+- A huge positive step is harmless: it plays to the end.
+- Suggestion: bound `StepBody.n` in the API, so a value out of range is a 422.
 
 **27. The error tray keeps the last 20 notices of every client id it has
 seen, for the life of the process** (`app/server-python/src/errors/hub.py`).
@@ -605,9 +599,9 @@ the tray replays old notices (27).
 - **25**: in minikube, `kubectl rollout restart deploy` (every deployment at
   once), then the server and workers' logs.
 - **26**: `curl -X POST
-  'localhost:8132/api/pmu-test-streamer/playback/seek?client_id=<id>' -H
-  'content-type: application/json' -d '{"offset_s": 10, "end_offset_s":
-  5}'`: 500. `-d '{"offset_s": 1e15}'` answers 500 too.
+  'localhost:8132/api/pmu-test-streamer/playback/step?client_id=<id>' -H
+  'content-type: application/json' -d '{"n": -1000000000000000}'`: 200, then
+  the tray shows the `OverflowError`.
 
 In minikube: `uv run pswamp deploy minikube --no-browser --no-logs`, then
 `kubectl port-forward service/p-swamp 30080:8000` and the page at

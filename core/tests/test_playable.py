@@ -6,13 +6,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import timedelta
 
 import pytest
-from support import ListSource, Recorder, at, frame
+from support import HEADER, ListSource, Recorder, at, frame
 
 from pswamp_core.command_routing import CommandRefused
 from pswamp_core.enrich import CimReferenceEnricher
 from pswamp_core.playable import PLAYBACK_COMMANDS, Playable
+from pswamp_core.settings import EnvSetting
 from pswamp_core.sources import SourceModule
 from pswamp_models.common import ErrorEvent
 from pswamp_models.player import (
@@ -168,9 +170,9 @@ async def test_step_forward_and_back():
 
 async def test_seek_shows_the_frame_there_and_a_chunk_ends_paused():
     player, out = await running(ListSource())
-    await command(player, SeekCommand(offset_s=0.5))
+    await command(player, SeekCommand(at=at(0.5)))
     assert (player.cursor, frames(out)[-1], player.paused) == (at(0.5), at(0.5), True)
-    await command(player, SeekCommand(offset_s=0.2, end_offset_s=0.4, play=True))
+    await command(player, SeekCommand(at=at(0.2), until=at(0.4), play=True))
     assert player.status().range_end == at(0.4)
     await until(lambda: player.ended)
     assert frames(out)[-4:] == [at(0.2), at(0.25), at(0.3), at(0.35)] and player.paused
@@ -183,7 +185,7 @@ async def test_streams_count_the_start_a_seek_a_step_back_and_a_loop():
     await command(player, StepCommand(n=2))
     assert player.streams == 1  # forward is the same stream
     await command(player, StepCommand(n=-1))
-    await command(player, SeekCommand(offset_s=0.05))
+    await command(player, SeekCommand(at=at(0.05)))
     assert player.streams == 3
     await command(player, PlayCommand())
     await until(lambda: player.streams >= 5)  # it loops
@@ -193,7 +195,7 @@ async def test_streams_count_the_start_a_seek_a_step_back_and_a_loop():
 async def test_what_does_not_apply_is_refused():
     player, _ = await running(ListSource())
     with pytest.raises(CommandRefused):
-        player.validate(SeekCommand(offset_s=5))  # the recording is one second long
+        player.validate(SeekCommand(at=at(5)))  # the recording is one second long
     await player.stop()
 
 
@@ -206,7 +208,7 @@ def test_a_playable_is_a_module_whose_commands_need_its_running_player():
 
 async def test_arun_command_drives_a_started_playable_and_answers_through_its_sink():
     player, out = await running(ListSource())
-    assert await player.arun_command(SeekCommand(offset_s=0.5)) == []
+    assert await player.arun_command(SeekCommand(at=at(0.5))) == []
     await until(lambda: player.status().cursor == at(0.5))
     await player.stop()
 
@@ -263,3 +265,100 @@ async def test_the_playable_leaves_its_source_open_for_the_set_to_close():
     assert (source.opened, source.closed) == (1, 0)
     await source._ensure_closed()
     assert source.closed == 1
+
+
+# --- gaps ----------------------------------------------------------------------------
+
+
+def with_gap() -> ListSource:
+    """0 to 0.2 s, nothing for 29.8 s, then 30 to 30.2 s, at 20 Hz."""
+    return ListSource(frames=[frame(i / 20) for i in range(5)] + [frame(30 + i / 20) for i in range(5)])
+
+
+async def test_a_gap_is_crossed_at_once_and_reported_once():
+    player, out = await running(with_gap())  # real time: waiting out the gap would take 30 s
+    began = time.perf_counter()
+    await command(player, PlayCommand())
+    await until(lambda: player.ended, timeout=3)
+    assert time.perf_counter() - began < 2
+    assert frames(out) == [at(i / 20) for i in range(5)] + [at(30 + i / 20) for i in range(5)]
+    (gap,) = out.of(ErrorEvent)
+    assert (gap.source, gap.message) == ("player", "no data from list for 29.80 s")
+    assert gap.detail.startswith("2026-01-01 00:00:00.200 to 2026-01-01 00:00:30.000 UTC")
+    await player.stop()
+
+
+async def test_a_seek_into_a_gap_lands_after_it_and_says_so():
+    player, out = await running(with_gap())
+    await command(player, SeekCommand(at=at(10)))
+    assert (player.cursor, frames(out)[-1]) == (at(30), at(30))
+    (gap,) = out.of(ErrorEvent)
+    assert gap.message == "no data from list for 20.00 s"
+    assert gap.detail.startswith("2026-01-01 00:00:10.000 to 2026-01-01 00:00:30.000 UTC")
+    await player.stop()
+
+
+async def test_a_chunk_with_no_data_says_so():
+    player, out = await running(with_gap())
+    await command(player, SeekCommand(at=at(5), until=at(10)))
+    assert player.ended and player.paused
+    (gap,) = out.of(ErrorEvent)
+    assert gap.message == "no data from list in the range asked for"
+    assert gap.detail == "2026-01-01 00:00:05.000 to 2026-01-01 00:00:10.000 UTC"
+    await player.stop()
+
+
+async def test_steps_seeks_and_loops_without_a_gap_report_none():
+    player, out = await running(ListSource(frames=[frame(i / 20) for i in range(4)]), loop=True, speed=10)
+    await command(player, StepCommand(n=2))
+    await command(player, StepCommand(n=-1))
+    await command(player, SeekCommand(at=at(0.1)))
+    await command(player, PlayCommand())
+    await until(lambda: player.streams >= 6)  # it has looped to the start, twice
+    assert out.of(ErrorEvent) == []
+    await player.stop()
+
+
+async def test_a_slow_stream_s_frames_are_not_gaps():
+    slow = HEADER.model_copy(update={"data_rate": 1 / 1.5})  # a frame every 1.5 s, beyond the 1 s GAP
+    player, out = await running(ListSource(frames=[frame(i * 1.5, header=slow) for i in range(3)]), speed=10)
+    await command(player, PlayCommand())
+    await until(lambda: player.ended)
+    assert len(frames(out)) == 3 and out.of(ErrorEvent) == []
+    await player.stop()
+
+
+async def test_reports_are_limited_and_the_limit_restarts_with_each_stream():
+    every_2_s = ListSource(frames=[frame(i * 2.0) for i in range(10)])  # nine gaps
+    player, out = await running(every_2_s)
+    await command(player, PlayCommand())
+    await until(lambda: player.ended, timeout=3)
+    assert len(out.of(ErrorEvent)) == 1  # the other eight are held for the next report
+    player._pl_gap_reported -= 10  # as if ten seconds had passed
+    player._pl_report_gap(at(100), at(102))
+    assert out.of(ErrorEvent)[-1].detail.endswith("(and 8 more gaps since the last report)")
+    await command(player, SeekCommand(at=at(0.5)))  # a new stream: lands in a gap, reported at once
+    assert len(out.of(ErrorEvent)) == 3 and out.of(ErrorEvent)[-1].message == "no data from list for 1.50 s"
+    await player.stop()
+
+
+async def test_the_gap_is_a_setting():
+    class OwnGap(ListSource):
+        name = "own-gap-list-source"
+        env_settings = (EnvSetting("GAP", "longer here", default="60", kind="seconds"),)
+
+    assert [s.setting for s in ListSource.env_settings].count("GAP") == 1
+    assert [s.setting for s in Failing.env_settings].count("GAP") == 1  # a subclass, not twice
+    assert OwnGap(frames=[frame(0)]).settings.gap == timedelta(seconds=60)
+    player, out = await running(ListSource(frames=with_gap().frames, gap=60), speed=100)
+    began = time.perf_counter()
+    await command(player, PlayCommand())
+    await until(lambda: player.ended, timeout=3)
+    assert time.perf_counter() - began >= 0.25  # 29.8 s at 100×: waited out, not crossed
+    assert out.of(ErrorEvent) == []
+    await player.stop()
+
+
+def test_the_gap_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("LIST_GAP", "5")
+    assert ListSource.from_env("list").settings.gap == timedelta(seconds=5)

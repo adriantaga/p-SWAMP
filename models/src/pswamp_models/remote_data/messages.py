@@ -25,13 +25,15 @@ __all__ = ["RemoteDataQuery", "RemoteDataResult"]
 
 
 class RemoteDataQuery(BaseModel):
-    """A range query: records of ``model`` in ``[start, end)``; a null bound is open."""
+    """A range query: records of ``model`` in ``[start, end)``; a null bound is
+    open. With ``limit``, only the first ``limit`` of them: a page."""
 
     version: Literal["v1"] = "v1"
     query_id: str = Field(description="Client-generated, for matching the two sides' logs.")
     model: str = Field(description="The topic string of the records wanted, e.g. 'pmu.frame'.")
     start: datetime | None = Field(default=None, description="Inclusive start; null is open.")
     end: datetime | None = Field(default=None, description="Exclusive end; null is open.")
+    limit: int | None = Field(default=None, ge=1, description="At most this many records, the first in the range; null is all.")
 
     @field_validator("start", "end")
     @classmethod

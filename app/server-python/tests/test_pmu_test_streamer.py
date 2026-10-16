@@ -5,9 +5,27 @@ in ``test_pipeline_files.py``."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from pswamp_modules.live_synthetic import LIVE_STREAM_ID
+
+#: The sample recording's first frame: 60 frames at 20 Hz from here.
+SAMPLE_START = datetime(2026, 1, 1, 0, 0, 0, 50_000, tzinfo=timezone.utc)
+
+
+def at(seconds: float) -> str:
+    """The instant ``seconds`` after the sample's first frame, as the wire spells it."""
+    return (SAMPLE_START + timedelta(seconds=seconds)).isoformat()
+
+
+def index(state: dict) -> int | None:
+    """The 0-based frame shown, counted from the recording's first; None when live."""
+    if state["frame"] is None or state["player"]["mode"] != "replay":
+        return None
+    shown = datetime.fromisoformat(state["frame"]["timestamp"])
+    return round((shown - datetime.fromisoformat(state["player"]["coverage_start"])).total_seconds() * 20)
 
 
 @pytest.fixture
@@ -35,7 +53,9 @@ def test_the_socket_opens_on_the_paused_recording(server):
         state = ws.receive_json()
     player = state["player"]
     assert (player["mode"], player["paused"], player["sources"]) == ("replay", True, ["sample", "live"])
-    assert (state["frame_index"], state["frame_count"]) == (0, 60)
+    assert index(state) == 0 and datetime.fromisoformat(state["frame"]["timestamp"]) == SAMPLE_START
+    assert datetime.fromisoformat(player["coverage_end"]) == SAMPLE_START + timedelta(seconds=3)
+    assert "frame_index" not in state and "frame_count" not in state
     assert state["frame"]["header"]["cimReferenceId"] == "n44-cim-stub"
 
 
@@ -45,7 +65,7 @@ def test_play_brings_frames_and_their_stats(server):
         ack = server.post("/api/pmu-test-streamer/playback/speed?client_id=102", json={"speed": 5}).json()
         assert (ack["status"], ack["applied"]) == ("ok", "speed") and ack["request_id"]
         server.post("/api/pmu-test-streamer/playback/play?client_id=102")
-        state = next_state(ws, lambda s: s["stats"] is not None and s["frame_index"] >= 3)
+        state = next_state(ws, lambda s: s["stats"] is not None and index(s) >= 3)
         assert state["stats"]["result"]["n_stations"] == 5 and not state["player"]["paused"]
         server.post("/api/pmu-test-streamer/playback/pause?client_id=102")
         next_state(ws, lambda s: s["player"]["paused"])
@@ -54,17 +74,33 @@ def test_play_brings_frames_and_their_stats(server):
 def test_seek_step_and_a_chunk(server):
     with server.websocket_connect("/api/pmu-test-streamer/ws?client_id=103") as ws:
         ws.receive_json()
-        server.post("/api/pmu-test-streamer/playback/seek?client_id=103", json={"offset_s": 1.5})
-        next_state(ws, lambda s: s["frame_index"] == 30)  # 1.5 s after the first frame
+        server.post("/api/pmu-test-streamer/playback/seek?client_id=103", json={"at": at(1.5)})
+        next_state(ws, lambda s: index(s) == 30)  # 1.5 s after the first frame
         server.post("/api/pmu-test-streamer/playback/step?client_id=103", json={"n": 2})
-        next_state(ws, lambda s: s["frame_index"] == 32)
+        next_state(ws, lambda s: index(s) == 32)
         server.post("/api/pmu-test-streamer/playback/step?client_id=103", json={"n": -1})
-        next_state(ws, lambda s: s["frame_index"] == 31)
+        next_state(ws, lambda s: index(s) == 31)
         server.post("/api/pmu-test-streamer/playback/speed?client_id=103", json={"speed": 10})
-        body = {"offset_s": 0.5, "end_offset_s": 1.0, "play": True}
+        body = {"at": at(0.5), "until": at(1.0), "play": True}
         server.post("/api/pmu-test-streamer/playback/seek?client_id=103", json=body)
         ended = next_state(ws, lambda s: s["player"]["ended"])
-        assert ended["frame_index"] == 19 and ended["player"]["paused"]  # the last frame before 1.0 s
+        assert index(ended) == 19 and ended["player"]["paused"]  # the last frame before 1.0 s
+
+
+def test_a_seek_names_an_instant(server):
+    seek = "/api/pmu-test-streamer/playback/seek?client_id=106"
+    with server.websocket_connect("/api/pmu-test-streamer/ws?client_id=106") as ws:
+        ws.receive_json()
+        assert server.post(seek, json={"at": "2026-01-01T00:00:01.05"}).status_code == 200  # no zone: UTC
+        next_state(ws, lambda s: index(s) == 20)
+        assert server.post(seek, json={"at": "2025-12-31T00:00:00Z"}).status_code == 200  # before: the first frame
+        next_state(ws, lambda s: index(s) == 0)
+        past = server.post(seek, json={"at": at(3)})
+        assert past.status_code == 409 and "past the end" in past.json()["detail"]
+        before = server.post(seek, json={"at": "2025-12-31T00:00:00Z", "until": "2025-12-31T00:00:01Z"})
+        assert before.status_code == 409 and "before the recording starts" in before.json()["detail"]
+        backwards = server.post(seek, json={"at": at(1), "until": at(0.5)})
+        assert backwards.status_code == 422
 
 
 def test_live_is_a_source_without_transport_controls(server):
@@ -72,8 +108,8 @@ def test_live_is_a_source_without_transport_controls(server):
         ws.receive_json()
         server.post("/api/pmu-test-streamer/playback/source?client_id=104", json={"name": "live"})
         state = next_state(ws, lambda s: s["player"]["mode"] == "live" and s["frame"] is not None)
-        assert state["frame"]["mRID"] == LIVE_STREAM_ID and state["frame_index"] is None
-        refused = server.post("/api/pmu-test-streamer/playback/seek?client_id=104", json={"offset_s": 1})
+        assert state["frame"]["mRID"] == LIVE_STREAM_ID and index(state) is None
+        refused = server.post("/api/pmu-test-streamer/playback/seek?client_id=104", json={"at": at(1)})
         assert refused.status_code == 409 and "live" in refused.json()["detail"]
         # The excursion module reads the shared stream: no per-viewer setting.
         refused = server.post("/api/pmu-test-streamer/excursion/auto-pause?client_id=104", json={"enabled": True})
@@ -129,16 +165,16 @@ def test_auto_pause_stops_the_replay_at_the_excursion(server):
         server.post("/api/pmu-test-streamer/playback/play?client_id=301")
         next_state(ws, lambda s: not s["player"]["paused"])
         paused = next_state(ws, lambda s: s["player"]["paused"], limit=2000)
-        assert 20 <= paused["frame_index"] <= 30  # the trip, about 1.3 s in
+        assert 20 <= index(paused) <= 30  # the trip, about 1.3 s in
         assert paused["excursion"]["result"]["excursions"] >= 1
 
 
 def test_a_range_summary_arrives_on_the_socket_and_a_refusal_as_an_error(server):
     with server.websocket_connect("/api/pmu-test-streamer/ws?client_id=302") as ws:
         ws.receive_json()
-        body = {"source": "sample", "offset_s": 1.0, "end_offset_s": 2.0}
+        body = {"source": "sample", "start": at(1.0), "end": at(2.0)}
         assert server.post("/api/pmu-test-streamer/summary?client_id=302", json=body).status_code == 200
         state = next_state(ws, lambda s: s["summary"] is not None)
         assert state["summary"]["result"]["frames"] == 20
-        live = {"source": "live", "offset_s": 0, "end_offset_s": 1}
+        live = {"source": "live", "start": at(0), "end": at(1)}
         assert server.post("/api/pmu-test-streamer/summary?client_id=302", json=live).status_code == 200  # checked where it runs

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -48,14 +49,20 @@ class Served(SourceModule):
                 yield record
 
 
-def over(app_or_handler) -> RemoteHistory:
-    """A source whose connection is ``app_or_handler``: the stub app, or a mock handler."""
+def over(app_or_handler, queries: list | None = None, **settings) -> RemoteHistory:
+    """A source whose connection is ``app_or_handler``: the stub app, or a mock
+    handler. ``queries`` collects the body of every query it sends."""
     if callable(app_or_handler) and not hasattr(app_or_handler, "routes"):
         transport = httpx.MockTransport(app_or_handler)
     else:
         transport = httpx.ASGITransport(app=app_or_handler)
-    http = httpx.AsyncClient(transport=transport, base_url="http://stub")
-    return RemoteHistory("remote", url="http://stub", http_client=http)
+
+    async def record(request: httpx.Request) -> None:
+        if queries is not None and request.url.path == "/v1/queries":
+            queries.append(json.loads(request.content))
+
+    http = httpx.AsyncClient(transport=transport, base_url="http://stub", event_hooks={"request": [record]})
+    return RemoteHistory("remote", url="http://stub", http_client=http, **settings)
 
 
 class TestRemoteHistoryOverTheStub(SourceConformance):
@@ -65,6 +72,18 @@ class TestRemoteHistoryOverTheStub(SourceConformance):
     @pytest.fixture
     def source_under_test(self):
         return over(create_app(Served("served")))
+
+    @pytest.fixture
+    def conformance_records(self):
+        return FRAMES
+
+
+class TestRemoteHistoryInPages(SourceConformance):
+    """The same, seven records a query: every range is read as several pages."""
+
+    @pytest.fixture
+    def source_under_test(self):
+        return over(create_app(Served("served")), page=7)
 
     @pytest.fixture
     def conformance_records(self):
@@ -174,3 +193,90 @@ async def test_a_source_set_reads_a_chunk_through_the_service():
     chunk = [f async for f in await sources.consume(coverage.start, FRAMES[3].timestamp)]
     assert [f.timestamp for f in chunk] == [f.timestamp for f in FRAMES[:3]]
     await sources.close()
+
+
+# --- pages ---------------------------------------------------------------------------
+
+MICROSECOND = timedelta(microseconds=1)
+
+
+def starts(queries: list) -> list:
+    return [None if q["start"] is None else datetime.fromisoformat(q["start"]) for q in queries]
+
+
+def serving(frames, *, honour_start=True):
+    """A service that ignores ``limit``: every record from the start on, then the end line."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        from pswamp_models.remote_data import RemoteDataResult
+
+        start = json.loads(request.content)["start"]
+        start = None if start is None or not honour_start else datetime.fromisoformat(start)
+        sent = [f for f in frames if start is None or f.timestamp >= start]
+        body = b"".join(RemoteDataResult.for_record(f).to_line() for f in sent)
+        return httpx.Response(200, content=body + RemoteDataResult(kind="end", count=len(sent)).to_line())
+
+    return handler
+
+
+def test_a_page_has_a_positive_size():
+    from pswamp_models.remote_data import RemoteDataQuery
+
+    assert RemoteHistory(url="u").page == 30000 and RemoteHistory(url="u", page=7).page == 7
+    with pytest.raises(ValueError, match="PAGE"):
+        RemoteHistory(url="u", page=0)
+    with pytest.raises(ValidationError):
+        RemoteDataQuery(query_id="q", model="pmu.frame", limit=0)
+
+
+def test_the_page_size_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("REMOTE_URL", "http://remote-data:8100")
+    monkeypatch.setenv("REMOTE_PAGE", "500")
+    assert RemoteHistory.from_env("remote").page == 500
+
+
+async def test_a_range_is_read_in_pages_each_from_after_the_last_record():
+    queries: list = []
+    got = [f async for f in over(create_app(Served("served")), queries, page=10).aread()]
+    assert [f.timestamp for f in got] == [f.timestamp for f in FRAMES]
+    # Twenty records, ten a page: the third query finds none, and that ends it.
+    assert starts(queries) == [None, FRAMES[9].timestamp + MICROSECOND, FRAMES[19].timestamp + MICROSECOND]
+    assert [q["limit"] for q in queries] == [10, 10, 10] and len({q["query_id"] for q in queries}) == 3
+
+
+async def test_a_short_page_is_the_last():
+    queries: list = []
+    got = [f async for f in over(create_app(Served("served")), queries, page=7).aread()]
+    assert len(got) == 20 and len(queries) == 3  # 7, 7, 6
+
+
+async def test_no_page_is_asked_for_past_the_end_of_the_range():
+    queries: list = []
+    end = FRAMES[6].timestamp + MICROSECOND
+    got = [f async for f in over(create_app(Served("served")), queries, page=7).aread(None, end)]
+    assert len(got) == 7 and len(queries) == 1
+
+
+async def test_a_service_that_ignores_the_limit_is_read_a_page_at_a_time():
+    queries: list = []
+    got = [f async for f in over(serving(FRAMES), queries, page=7).aread()]
+    assert [f.timestamp for f in got] == [f.timestamp for f in FRAMES]
+    assert starts(queries) == [None, FRAMES[6].timestamp + MICROSECOND, FRAMES[13].timestamp + MICROSECOND]
+
+
+async def test_a_service_that_ignores_the_start_is_caught_not_looped_on():
+    source = over(serving(FRAMES, honour_start=False), page=7)
+    got: list = []
+    with pytest.raises(RuntimeError, match="did not move past"):
+        async for frame in source.aread():
+            got.append(frame)
+    assert [f.timestamp for f in got] == [f.timestamp for f in FRAMES[:7]]  # and no repeats
+
+
+async def test_the_stub_sends_a_page_and_its_end():
+    from pswamp_models.remote_data import RemoteDataResult
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(Served("served"))), base_url="http://stub") as http:
+        response = await http.post("/v1/queries", json={"query_id": "q", "model": "pmu.frame", "limit": 5})
+    results = [RemoteDataResult.model_validate_json(line) for line in response.text.splitlines()]
+    assert [r.kind for r in results] == ["record"] * 5 + ["end"] and results[-1].count == 5

@@ -18,6 +18,8 @@ It is a *history* (it has a `coverage`, `[0.05 s, 3.05 s)` after 2026-01-01) and
 **Settings:** `path`, another file in the same one-line-per-station format
 (default: the bundled one). A deployment sets `{SOURCE}_PATH` (`SAMPLE_PATH` for
 a source named `sample`); a script passes `SampleReplay(path="mine.txt")`.
+Like every playable source it also has `gap` (`{SOURCE}_GAP`, default 1 s): a
+longer stretch without frames is crossed at once and reported.
 
 ## From a script
 

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon, WifiOffIcon } from 'lucide-react'
 
 import { usePmuStreamSocket } from './usePmuStreamSocket'
 import { FrameTable } from './FrameTable'
+import { Timeline } from './Timeline'
+import { addSeconds, formatUtc, secondsBetween } from './time'
 import { Alert, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,11 +11,6 @@ import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const SPEEDS = ['0.5', '1', '2', '5']
-
-/** Seconds from one ISO instant to another. */
-function secondsBetween(from?: string | null, to?: string | null): number | null {
-  return from && to ? (new Date(to).getTime() - new Date(from).getTime()) / 1000 : null
-}
 
 /**
  * The PMU test streamer (route `/pmu-test-streamer`): the server data
@@ -39,31 +35,13 @@ export function PmuTestStreamerPage() {
     summarize,
   } = usePmuStreamSocket()
 
-  // The slider position while dragged; null when it follows the cursor. One
-  // seek on release, listened for on the window so a release anywhere counts.
-  const [scrub, setScrub] = useState<number | null>(null)
-  useEffect(() => {
-    if (scrub === null) return
-    const commit = () => {
-      seek(scrub)
-      setScrub(null)
-    }
-    const timer = setTimeout(commit, 1000)
-    window.addEventListener('pointerup', commit)
-    window.addEventListener('pointercancel', commit)
-    return () => {
-      clearTimeout(timer)
-      window.removeEventListener('pointerup', commit)
-      window.removeEventListener('pointercancel', commit)
-    }
-  }, [scrub, seek])
-
   const player = state?.player
   const live = player?.mode === 'live'
   const playing = player !== undefined && !player.paused && !live
-  const offset = secondsBetween(player?.coverage_start, state?.frame?.timestamp) ?? 0
-  const duration = secondsBetween(player?.coverage_start, player?.coverage_end) ?? 0
   const interval = header ? 1 / header.data_rate : 0.05
+  // The next second from the frame at the cursor, cut at the coverage's end.
+  const cursorAt = state?.frame?.timestamp ?? null
+  const chunkSeconds = Math.min(1, secondsBetween(cursorAt, player?.coverage_end) ?? 0)
   const controls = connected && !live
   const canSeek = controls && player?.can_seek === true
   const stats = state?.stats?.result
@@ -71,7 +49,7 @@ export function PmuTestStreamerPage() {
   const summary = state?.summary?.result
 
   return (
-    <Card className="w-full max-w-xl gap-0">
+    <Card className="w-full max-w-3xl gap-0">
       <CardHeader className="border-b">
         <CardTitle className="text-lg">PMU Test Streamer</CardTitle>
         <span className="text-gray-500">
@@ -138,11 +116,7 @@ export function PmuTestStreamerPage() {
         <div className="grid w-full grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1 text-sm">
           <span className="text-right text-muted-foreground">Frame</span>
           <span className="tabular-nums" data-testid="frame-readout">
-            {live && state?.frame
-              ? `Live · ${new Date(state.frame.timestamp).toISOString().slice(11, 23)} UTC`
-              : state?.frame_index != null
-                ? `${state.frame_index + 1} of ${state.frame_count ?? '?'} · t = ${offset.toFixed(2)} s`
-                : '—'}
+            {state?.frame ? `${live ? 'Live · ' : ''}${formatUtc(state.frame.timestamp)}` : '—'}
           </span>
           <span className="text-right text-muted-foreground">Stats</span>
           <span className="tabular-nums" data-testid="stats-readout">
@@ -176,35 +150,21 @@ export function PmuTestStreamerPage() {
           <span className="text-right text-muted-foreground">Summary</span>
           <span className="flex items-center gap-3 tabular-nums" data-testid="summary-readout">
             {summary
-              ? `${summary.source} [${summary.offset_s.toFixed(2)}, ${summary.end_offset_s.toFixed(2)}) s · ${summary.frames} frames · f ${summary.min_frequency_hz.toFixed(4)}–${summary.max_frequency_hz.toFixed(4)} Hz`
+              ? `${summary.source} · ${formatUtc(summary.start)} + ${(secondsBetween(summary.start, summary.end) ?? 0).toFixed(2)} s · ${summary.frames} frames · f ${summary.min_frequency_hz.toFixed(4)}–${summary.max_frequency_hz.toFixed(4)} Hz`
               : '—'}
             <Button
               variant="outline"
               size="sm"
               className="ml-auto"
-              disabled={!connected || !player}
-              onClick={() => player && summarize(player.source, offset, offset + 1)}
+              disabled={!connected || !player || !cursorAt}
+              onClick={() => player && cursorAt && summarize(player.source, cursorAt, addSeconds(cursorAt, 1))}
             >
               Summarize next 1 s
             </Button>
           </span>
         </div>
 
-        <div className="flex w-full items-center gap-3 text-xs text-muted-foreground">
-          <span className="whitespace-nowrap tabular-nums">0 s</span>
-          <input
-            type="range"
-            aria-label="Seek"
-            className="w-full"
-            min={0}
-            max={Math.max(duration - interval, 0)}
-            step={interval}
-            value={scrub ?? (live ? 0 : offset)}
-            disabled={!canSeek}
-            onChange={(event) => setScrub(Number(event.target.value))}
-          />
-          <span className="whitespace-nowrap tabular-nums">{duration.toFixed(1)} s</span>
-        </div>
+        <Timeline player={player} cursorAt={cursorAt} interval={interval} playing={playing} canSeek={canSeek} seek={seek} />
 
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button variant="outline" size="icon" aria-label="Step back" disabled={!canSeek} onClick={() => step(-1)}>
@@ -235,8 +195,8 @@ export function PmuTestStreamerPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={!canSeek}
-            onClick={() => seek(offset, Math.min(offset + 1, duration), true)}
+            disabled={!canSeek || !cursorAt || chunkSeconds <= 0}
+            onClick={() => cursorAt && seek(cursorAt, addSeconds(cursorAt, chunkSeconds), true)}
           >
             Play next 1 s
           </Button>

@@ -61,7 +61,7 @@ pipeline is `pipelines/pmu-test-streamer.toml`. Its parts:
 
 | Part | What it is |
 |---|---|
-| sources | `sample`: a 3 s recording of five stations at 20 Hz, spanning a line trip. `live`: the same frames stamped now, as a live feed. `remote` (compose and k8s): the recording again, served by the remote data stub. |
+| sources | `sample`: a 3 s recording of five stations at 20 Hz, spanning a line trip. `live`: the same frames stamped now, as a live feed. `remote` (compose and k8s): a year of synthetic history with outages (`synthetic-history`), served by the remote data stub. |
 | `FrameStatsModule` (`frame-stats`) | Reads every `PmuFrame`. Publishes a `FrameStatsResult`: the mean, lowest and highest frequency across the stations at that instant, the voltage angle spread and the mean voltage. |
 | `ExcursionModule` (`excursion`) | Reads every `FrameStatsResult`, so it is chained onto the module above. Publishes an `ExcursionResult`: whether the mean frequency is within ±0.005 Hz of 50 Hz, and how many times it has left that band. After an `AutoPauseCommand` it pauses the player when the frequency leaves the band. |
 | `RangeSummaryModule` (`range-summary`) | Reads no stream. On a `SummarizeRangeCommand` it reads a time range of a recording itself and publishes a `RangeSummaryResult`: the frames in the range and their lowest, highest and mean frequency. |
@@ -552,9 +552,17 @@ disturbance needs real time and needs to scrub. The rules, which the
   buttons.
 - **Paused, it shows the frame at its cursor.** Start, seek, step and a switch
   to a recording each publish the frame there.
-- **A seek is a new stream.** A seek with `end_offset_s` plays that chunk and
-  stops, paused.
+- **A seek is a new stream, and names an instant.** `SeekCommand(at=…)` lands
+  on the first frame at or after `at` (UTC); one before the recording lands on
+  its first frame, one past its end is refused. With `until` it plays that
+  chunk and stops, paused.
 - **Pacing drops time rather than bursting** when it falls behind.
+- **A gap is crossed at once, and reported.** A next frame more than
+  `{SOURCE}_GAP` seconds (default 1, at least two frame intervals) past the
+  cursor is due now, not after the gap, and an `ErrorEvent` on the tray says
+  from when to when there is no data. A seek that lands in a gap, or a chunk
+  with no data, reports the same way. At most one report per 5 s reaches the
+  tray, the first of each stream always; every gap is logged.
 - **A provider failure stops the stream loudly**: paused, `error` set, an
   `ErrorEvent` published. Play tries again.
 - **One task** reads the stream, paces, and applies the commands `handle`
@@ -600,7 +608,7 @@ declares that it handles it: the router (for the player commands), or one module
 its own topic, `<app>.<command>`, under the run's key.
 
 ```python
-run.dispatch(SeekCommand(client_id=id, offset_s=12))
+run.dispatch(SeekCommand(client_id=id, at=datetime(2026, 1, 1, 0, 0, 12, tzinfo=UTC)))
 #   a player command?  router.validate(cmd)    raises CommandRefused: the POST's 409
 #   a module command?  published as it is       the module validates it where it runs
 #   nobody takes it?   NoReceiver
@@ -720,9 +728,13 @@ are `ErrorEvent`s, so they reach the error tray.
 remote data service: a small REST api in front of whatever store holds its
 history. Coverage is `GET /v1/coverage`. A range is `POST /v1/queries`, and its
 records come back as that call's streamed response, one NDJSON line each,
-closed by an `end` line. **The contract is
+closed by an `end` line. A long range is read as pages of at most
+`REMOTE_PAGE` records, each query starting after the last page's last record;
+the paging is inside the source's `aread`, so to the player it is one stream.
+**The contract is
 `doc/remote-data-integration-contract.md`**, in HTTP terms alone. In compose
-and k8s, `remote-data-stub` serves the streamer's sample recording over it,
+and k8s, `remote-data-stub` serves a year of synthetic history with outages
+(`modules/synthetic-history/`) over it, as a long-term store would,
 and the streamer lists it as its third source, `remote` (`remote:remote-history`
 in `PMU_TEST_STREAMER_SOURCES`, with `REMOTE_URL`).
 

@@ -37,13 +37,10 @@ export function usePmuStreamSocket() {
     (n: number) => fire(postCommand(`${PMU_STREAM_API_PATH}/playback/step`, { body: { n } })),
     [],
   )
+  /** Go to the instant `at` (ISO, UTC); with `until`, play only `[at, until)`. */
   const seek = useCallback(
-    (offsetS: number, endOffsetS: number | null = null, playing = false) =>
-      fire(
-        postCommand(`${PMU_STREAM_API_PATH}/playback/seek`, {
-          body: { offset_s: offsetS, end_offset_s: endOffsetS, play: playing },
-        }),
-      ),
+    (at: string, until: string | null = null, playing = false) =>
+      fire(postCommand(`${PMU_STREAM_API_PATH}/playback/seek`, { body: { at, until, play: playing } })),
     [],
   )
   const setSpeed = useCallback(
@@ -60,13 +57,10 @@ export function usePmuStreamSocket() {
       fire(postCommand(`${PMU_STREAM_API_PATH}/excursion/auto-pause`, { body: { enabled } })),
     [],
   )
+  /** Summarize `[start, end)` (ISO, UTC) of the recording `source`. */
   const summarize = useCallback(
-    (source: string, offsetS: number, endOffsetS: number) =>
-      fire(
-        postCommand(`${PMU_STREAM_API_PATH}/summary`, {
-          body: { source, offset_s: offsetS, end_offset_s: endOffsetS },
-        }),
-      ),
+    (source: string, start: string, end: string) =>
+      fire(postCommand(`${PMU_STREAM_API_PATH}/summary`, { body: { source, start, end } })),
     [],
   )
 

@@ -9,9 +9,13 @@ player is the one receiver of every ``PlayerCommand``.
 
 from __future__ import annotations
 
-from pydantic import Field, model_validator
+from datetime import datetime
+from typing import Literal
+
+from pydantic import Field, field_validator, model_validator
 
 from ..common.command import Command
+from ..common.utc import ensure_utc
 
 __all__ = [
     "PauseCommand",
@@ -43,22 +47,26 @@ class StepCommand(PlayerCommand):
 
 
 class SeekCommand(PlayerCommand):
-    """Move the replay to ``offset_s`` into the recording.
+    """Move the replay to the instant ``at``: the first frame at or after it.
 
-    With ``end_offset_s`` it plays only ``[offset_s, end_offset_s)`` and ends
-    paused there, instead of running on or looping: a chunk.
+    With ``until`` it plays only ``[at, until)`` and ends paused there, instead
+    of running on or looping: a chunk. An instant without a zone is UTC.
     """
 
-    offset_s: float = Field(ge=0, description="Seconds from the start of the recording.")
-    end_offset_s: float | None = Field(
-        default=None, gt=0, description="Stop here instead of running on: seconds from the start."
-    )
+    version: Literal["v2"] = "v2"
+    at: datetime = Field(description="The instant to go to, UTC.")
+    until: datetime | None = Field(default=None, description="Stop here instead of running on: exclusive, UTC.")
     play: bool = Field(default=False, description="Also start playing, if paused.")
 
+    @field_validator("at", "until")
+    @classmethod
+    def _utc(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else ensure_utc(value)
+
     @model_validator(mode="after")
-    def _end_after_start(self) -> SeekCommand:
-        if self.end_offset_s is not None and self.end_offset_s <= self.offset_s:
-            raise ValueError("end_offset_s must be after offset_s")
+    def _until_after_at(self) -> SeekCommand:
+        if self.until is not None and self.until <= self.at:
+            raise ValueError("until must be after at")
         return self
 
 

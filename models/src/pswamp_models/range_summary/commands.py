@@ -5,19 +5,26 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ..common.command import Command
+from ..common.utc import ensure_utc
 
 __all__ = ["SummarizeRangeCommand"]
 
 
 class SummarizeRangeCommand(Command):
-    """Summarize ``[offset_s, end_offset_s)`` of a recording."""
+    """Summarize ``[start, end)`` of a recording. An instant without a zone is UTC."""
 
-    version: Literal["v1"] = "v1"
+    version: Literal["v2"] = "v2"
     source: str = Field(description="The recording: a history source of the pipeline.")
-    offset_s: float = Field(ge=0, description="Seconds from the start of the recording.")
-    end_offset_s: float = Field(gt=0, description="Exclusive end, in seconds from the start.")
+    start: datetime = Field(description="Inclusive start, UTC.")
+    end: datetime = Field(description="Exclusive end, UTC.")
+
+    @field_validator("start", "end")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return ensure_utc(value)

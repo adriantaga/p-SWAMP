@@ -73,7 +73,7 @@ async def test_it_replays_paced_from_the_start_and_seeks():
     assert source.status().can_seek and source.status().paused
     assert [m.timestamp for m in sink.published if isinstance(m, PmuFrame)] == [load_sample().frames[0].timestamp]
     await source.ahandle(SpeedCommand(speed=20))
-    await source.ahandle(SeekCommand(offset_s=2.5, play=True))
+    await source.ahandle(SeekCommand(at=load_sample().frames[50].timestamp, play=True))  # 2.5 s in
     for _ in range(200):
         if source.ended:
             break

@@ -56,18 +56,23 @@ class InMemoryHistory(SourceModule):
                 yield frame
 
 
+def at(seconds: float) -> datetime:
+    """``seconds`` into the recording."""
+    return T0 + timedelta(seconds=seconds)
+
+
 def main() -> None:
     summary = RangeSummaryModule()
     summary.sources = SourceSet([InMemoryHistory("synthetic", recording())])
     for start, end in ((0.0, 2.5), (2.5, 5.0), (5.0, 7.5), (7.5, 10.0)):
-        (answer,) = summary.run_command(SummarizeRangeCommand(source="synthetic", offset_s=start, end_offset_s=end))
+        (answer,) = summary.run_command(SummarizeRangeCommand(source="synthetic", start=at(start), end=at(end)))
         r = answer.result
         print(
             f"[{start:4.1f}, {end:4.1f}) s  {r.frames} frames  "
             f"min {r.min_frequency_hz:.4f}  mean {r.mean_frequency_hz:.4f}  max {r.max_frequency_hz:.4f} Hz"
         )
     try:  # a range outside the recording is refused, as hosted it becomes an ErrorEvent
-        summary.run_command(SummarizeRangeCommand(source="synthetic", offset_s=20.0, end_offset_s=21.0))
+        summary.run_command(SummarizeRangeCommand(source="synthetic", start=at(20.0), end=at(21.0)))
     except CommandRefused as refused:
         print(f"refused: {refused}")
 

@@ -67,27 +67,35 @@ def sources() -> SourceSet:
     return SourceSet([Recording("sample"), Feed("live")])
 
 
+def summarize(source: str, start: float, end: float) -> SummarizeRangeCommand:
+    """``[start, end)`` seconds after ``T0``."""
+    return SummarizeRangeCommand(source=source, start=T0 + timedelta(seconds=start), end=T0 + timedelta(seconds=end))
+
+
 async def test_the_range_summary_reads_its_own_sources():
     module = RangeSummaryModule()
     module.sources = sources()
-    command = SummarizeRangeCommand(source="sample", offset_s=1.0, end_offset_s=2.0)
+    command = summarize("sample", 1.0, 2.0)
     (answer,) = await module.arun_command(command)
     assert isinstance(answer, RangeSummaryResult) and answer.request_id == command.request_id
     summary = answer.result
     assert summary.frames == 20 and summary.max_frequency_hz > 50.0075
-    for refused in (
-        SummarizeRangeCommand(source="live", offset_s=0, end_offset_s=1),
-        SummarizeRangeCommand(source="nope", offset_s=0, end_offset_s=1),
-        SummarizeRangeCommand(source="sample", offset_s=2, end_offset_s=1),
-    ):
+    assert (summary.start, summary.end) == (T0 + timedelta(seconds=1), T0 + timedelta(seconds=2))
+    assert summary.min_frequency_hz == pytest.approx(50.004) and summary.mean_frequency_hz == pytest.approx(50.0059)
+    for refused in (summarize("live", 0, 1), summarize("nope", 0, 1), summarize("sample", 2, 1)):
         with pytest.raises(CommandRefused):
             module.validate(refused)
     with pytest.raises(CommandRefused, match="nothing"):
-        await module.ahandle(SummarizeRangeCommand(source="sample", offset_s=10, end_offset_s=11))
+        await module.ahandle(summarize("sample", 10, 11))
+
+
+def test_an_instant_without_a_zone_is_utc():
+    naive = SummarizeRangeCommand(source="sample", start=datetime(2026, 1, 1, 0, 0, 1), end=datetime(2026, 1, 1, 0, 0, 2))
+    assert naive.start == T0 + timedelta(seconds=1) and naive.start.tzinfo is not None
 
 
 def test_the_range_summary_answers_from_plain_code():
     module = RangeSummaryModule()
     module.sources = sources()
-    (answer,) = module.run_command(SummarizeRangeCommand(source="sample", offset_s=0.0, end_offset_s=1.0))
+    (answer,) = module.run_command(summarize("sample", 0.0, 1.0))
     assert answer.result.frames == 20

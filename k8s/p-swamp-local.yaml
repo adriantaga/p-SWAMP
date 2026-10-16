@@ -5,7 +5,7 @@
 #   p-swamp                   the server, with the web client baked in (NodePort 30080)
 #   p-swamp-module-worker     the streamer's frame-rate modules: frame-stats, excursion
 #   p-swamp-batch-worker      the range summary, with its own CPU limit
-#   p-swamp-remote-data-stub  the sample recording behind the remote data contract
+#   p-swamp-remote-data-stub  a year of synthetic history behind the remote data contract
 #   p-swamp-kafka             the broker between the server and the workers
 #
 # All the same image except Kafka. The workers and the stub run from modules/,
@@ -239,7 +239,7 @@ spec:
             - name: PYTHONPATH
               value: /workspace/p-SWAMP/modules/remote-history/examples
             - name: REMOTE_DATA_STUB_SOURCE
-              value: sample:sample-replay
+              value: history:synthetic-history
           ports:
             - name: http
               containerPort: 8100

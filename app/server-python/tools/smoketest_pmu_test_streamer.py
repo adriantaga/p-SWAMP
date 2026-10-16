@@ -70,7 +70,8 @@ async def main(base: str) -> int:
         state = json.loads(await asyncio.wait_for(ws.recv(), TIMEOUT))
         player = state["player"]
         check("on connect: the recording, paused, showing its first frame",
-              player["mode"] == "replay" and player["paused"] and state["frame_index"] == 0, player)
+              player["mode"] == "replay" and player["paused"]
+              and state["frame"]["timestamp"] == player["coverage_start"], player)
         check("the frame carries the CIM reference", state["frame"]["header"]["cimReferenceId"] is not None)
         status, ack = post(base, "/playback/speed", client_id, {"speed": 5})
         check("POST speed -> 200 {status, applied}", status == 200 and ack.get("applied") == "speed", (status, ack))
@@ -80,8 +81,8 @@ async def main(base: str) -> int:
               state is not None and state["stats"]["result"]["n_stations"] == 5, state)
         post(base, "/playback/source", client_id, {"name": "live"})
         state = await until(ws, lambda s: s["player"]["mode"] == "live" and s["frame"] is not None)
-        check("switch to live: a frame stamped now", state is not None and state["frame_index"] is None, state)
-        status, body = post(base, "/playback/seek", client_id, {"offset_s": 1})
+        check("switch to live: a frame stamped now", state is not None and not state["player"]["can_seek"], state)
+        status, body = post(base, "/playback/seek", client_id, {"at": state["frame"]["timestamp"]})
         check("seek while live -> 409", status == 409, (status, body))
         post(base, "/playback/source", client_id, {"name": "sample"})
         state = await until(ws, lambda s: s["player"]["mode"] == "replay")

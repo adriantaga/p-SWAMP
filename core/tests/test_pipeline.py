@@ -137,7 +137,7 @@ async def test_a_module_can_command_the_player(hosted):
 async def test_a_player_command_is_refused_before_it_is_published(hosted):
     run = await hosted()
     with pytest.raises(CommandRefused):
-        run.dispatch(SeekCommand(offset_s=99))
+        run.dispatch(SeekCommand(at=at(99)))
     with pytest.raises(NoReceiver):
         run.dispatch(Unanswered())
 
@@ -201,7 +201,7 @@ async def test_a_seek_a_switch_and_a_loop_each_start_a_new_stream_on_the_wire():
     run = PipelineRun("k", Pipeline("app", two_sources, modules=(FrameCounter,)), transport)
     with transport.subscribe(PmuFrame, app="app", key="k", overflow=Overflow.GROW) as frames:
         await run.start()  # the frame at the start
-        run.dispatch(SeekCommand(offset_s=0.5))
+        run.dispatch(SeekCommand(at=at(0.5)))
         await until(lambda: run.frame is not None and run.frame.timestamp == at(0.5))
         run.dispatch(SwitchSourceCommand(source="tick"))  # live, followed: nothing of its own
         await until(lambda: run.router.status().mode == "live")
@@ -223,7 +223,7 @@ async def test_a_result_from_before_the_stream_started_over_is_dropped_unless_as
     transport = InMemoryTransport()
     run = PipelineRun("k", Pipeline("app", sources, modules=(FrameCounter,)), transport)
     await run.start()
-    run.dispatch(SeekCommand(offset_s=0.5))
+    run.dispatch(SeekCommand(at=at(0.5)))
     await until(lambda: run.stream_key.stream == 2)
 
     def result(value: float, request_id: str | None = None) -> NumberResult:

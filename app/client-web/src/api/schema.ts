@@ -160,7 +160,7 @@ export interface paths {
         put?: never;
         /**
          * Seek
-         * @description Move to an offset into the recording; with an end, play only that chunk.
+         * @description Go to an instant in the recording; with an end, play only that chunk.
          */
         post: operations["pmu_test_streamer_seek"];
         delete?: never;
@@ -1208,16 +1208,6 @@ export interface components {
             excursion: components["schemas"]["ExcursionResult"] | null;
             /** @description The frame at the cursor, with its layout. */
             frame: components["schemas"]["PmuFrame"] | null;
-            /**
-             * Frame Count
-             * @description Frames in the recording; null when live.
-             */
-            frame_count: number | null;
-            /**
-             * Frame Index
-             * @description 0-based position of the frame in the recording; null when live.
-             */
-            frame_index: number | null;
             /** @description Where the player is and which controls apply. */
             player: components["schemas"]["PlayerStatus"];
             /** @description The frame statistics for (about) that frame. */
@@ -1233,8 +1223,12 @@ export interface components {
         };
         /** RangeSummary */
         RangeSummary: {
-            /** End Offset S */
-            end_offset_s: number;
+            /**
+             * End
+             * Format: date-time
+             * @description Exclusive end, UTC.
+             */
+            end: string;
             /**
              * Frames
              * @description Frames in the range.
@@ -1246,10 +1240,14 @@ export interface components {
             mean_frequency_hz: number;
             /** Min Frequency Hz */
             min_frequency_hz: number;
-            /** Offset S */
-            offset_s: number;
             /** Source */
             source: string;
+            /**
+             * Start
+             * Format: date-time
+             * @description The range summarized: inclusive start, UTC.
+             */
+            start: string;
         };
         /** RangeSummaryResult */
         RangeSummaryResult: {
@@ -1281,10 +1279,10 @@ export interface components {
             timestamp: string;
             /**
              * Version
-             * @default v1
+             * @default v2
              * @constant
              */
-            version: "v1";
+            version: "v2";
         };
         /**
          * ReferenceSubappState
@@ -1331,21 +1329,22 @@ export interface components {
         /** SeekBody */
         SeekBody: {
             /**
-             * End Offset S
-             * @description Stop here: play a chunk.
+             * At
+             * Format: date-time
+             * @description The instant to go to, UTC; the first frame at or after it is shown.
              */
-            end_offset_s?: number | null;
-            /**
-             * Offset S
-             * @description Seconds from the start of the recording.
-             */
-            offset_s: number;
+            at: string;
             /**
              * Play
              * @description Also start playing.
              * @default false
              */
             play: boolean;
+            /**
+             * Until
+             * @description Stop here, exclusive, UTC: play a chunk.
+             */
+            until?: string | null;
         };
         /** SourceBody */
         SourceBody: {
@@ -1374,20 +1373,22 @@ export interface components {
         /** SummaryBody */
         SummaryBody: {
             /**
-             * End Offset S
-             * @description Exclusive end, in seconds from the start.
+             * End
+             * Format: date-time
+             * @description Exclusive end, UTC.
              */
-            end_offset_s: number;
-            /**
-             * Offset S
-             * @description Seconds from the start of the recording.
-             */
-            offset_s: number;
+            end: string;
             /**
              * Source
              * @description The recording to read: one of PlayerStatus.sources.
              */
             source: string;
+            /**
+             * Start
+             * Format: date-time
+             * @description Inclusive start, UTC.
+             */
+            start: string;
         };
         /**
          * TimeWindowSlice

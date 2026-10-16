@@ -12,6 +12,7 @@ architecture; `doc/module-cookbook.md` is the recipe for a new module.
 | [`range-summary/`](range-summary/) | `pswamp-range-summary` | module | — | `RangeSummaryResult` | `SummarizeRangeCommand` |
 | [`remote-history/`](remote-history/) | `pswamp-remote-history` | source (history, playable) | — | `PmuFrame` | `PlayCommand`, `PauseCommand`, `StepCommand`, `SeekCommand`, `SpeedCommand` |
 | [`sample-replay/`](sample-replay/) | `pswamp-sample-replay` | source (history, playable) | — | `PmuFrame` | `PlayCommand`, `PauseCommand`, `StepCommand`, `SeekCommand`, `SpeedCommand` |
+| [`synthetic-history/`](synthetic-history/) | `pswamp-synthetic-history` | source (history, playable) | — | `PmuFrame` | `PlayCommand`, `PauseCommand`, `StepCommand`, `SeekCommand`, `SpeedCommand` |
 
 The same as `uv run pswamp modules list`, which shows it for whatever is
 installed. A **module** reads message classes from the transport and publishes

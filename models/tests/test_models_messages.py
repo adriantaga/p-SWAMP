@@ -139,8 +139,10 @@ def test_a_command_gets_a_request_id_and_its_name_from_its_class():
 
 
 def test_a_command_s_arguments_are_validated_fields():
-    assert SeekCommand(offset_s=3).offset_s == 3
-    for bad in ({}, {"offset_s": -1}, {"offset_s": 2, "end_offset_s": 2}):
+    moment = datetime(2026, 1, 1, 0, 0, 3, tzinfo=timezone.utc)
+    assert SeekCommand(at=moment).at == moment
+    assert SeekCommand(at="2026-01-01T00:00:03").at == moment  # an instant without a zone is UTC
+    for bad in ({}, {"at": "soon"}, {"at": moment, "until": moment}):
         with pytest.raises(ValidationError):
             SeekCommand(**bad)
     with pytest.raises(ValidationError):

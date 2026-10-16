@@ -11,10 +11,17 @@ import { choose, compose, underCompose } from './helpers'
 const frame = (page: Page) => page.getByTestId('frame-readout')
 const source = (page: Page) => page.getByRole('group', { name: 'Source' })
 
+/** The sample recording's frame `n` (1-based) as the readout spells it: 60
+ *  frames at 20 Hz from 2026-01-01 00:00:00.050 UTC. */
+function sampleFrame(n: number): string {
+  const ms = 50 * n
+  return `2026-01-01 00:00:${String(Math.floor(ms / 1000)).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')} UTC`
+}
+
 async function open(page: Page) {
   await page.goto('/pmu-test-streamer')
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
-  await expect(frame(page)).toHaveText(/^1 of 60 · t = 0\.00 s$/)
+  await expect(frame(page)).toHaveText(sampleFrame(1))
 }
 
 async function switchTo(page: Page, name: string) {
@@ -36,7 +43,7 @@ test.describe('PMU test streamer', () => {
     await open(page)
     await page.getByRole('button', { name: 'Play', exact: true }).click()
     await expect(page.getByText(/^Recorded · Playing$/)).toBeVisible()
-    await expect(frame(page)).not.toHaveText(/^1 of 60 /)
+    await expect(frame(page)).not.toHaveText(sampleFrame(1))
     await page.getByRole('button', { name: 'Pause', exact: true }).click()
     await expect(page.getByText(/^Recorded · Paused$/)).toBeVisible()
   })
@@ -46,11 +53,11 @@ test.describe('PMU test streamer', () => {
     const forward = page.getByRole('button', { name: 'Step forward', exact: true })
     await forward.click()
     await forward.click()
-    await expect(frame(page)).toHaveText(/^3 of 60 /)
+    await expect(frame(page)).toHaveText(sampleFrame(3))
     await page.getByRole('button', { name: 'Step back', exact: true }).click()
-    await expect(frame(page)).toHaveText(/^2 of 60 /)
+    await expect(frame(page)).toHaveText(sampleFrame(2))
     await page.getByRole('slider', { name: 'Seek' }).fill('1.5')
-    await expect(frame(page)).toHaveText(/^31 of 60 · t = 1\.50 s$/)
+    await expect(frame(page)).toHaveText(sampleFrame(31)) // 1.5 s after the first frame
   })
 
   test('speed is the player\'s, and survives a reload', async ({ page }) => {
@@ -64,7 +71,7 @@ test.describe('PMU test streamer', () => {
     await open(page)
     await page.getByRole('button', { name: 'Play next 1 s', exact: true }).click()
     await expect(page.getByText(/^Recorded · Ended$/)).toBeVisible({ timeout: 5000 })
-    await expect(frame(page)).toHaveText(/^20 of 60 /)
+    await expect(frame(page)).toHaveText(sampleFrame(20)) // the last frame before one second on
   })
 
   test('the excursion module pauses the player at the trip', async ({ page }) => {
@@ -83,7 +90,7 @@ test.describe('PMU test streamer', () => {
   test('a range summary, and a refused one on the error tray', async ({ page }) => {
     await open(page)
     await page.getByRole('button', { name: 'Summarize next 1 s', exact: true }).click()
-    await expect(page.getByTestId('summary-readout')).toContainText('sample [0.00, 1.00) s · 20 frames')
+    await expect(page.getByTestId('summary-readout')).toContainText(`sample · ${sampleFrame(1)} + 1.00 s · 20 frames`)
     await switchTo(page, 'live')
     await page.getByRole('button', { name: 'Summarize next 1 s', exact: true }).click()
     const tray = page.getByRole('region', { name: 'Errors' })
@@ -105,7 +112,7 @@ test.describe('PMU test streamer', () => {
     await expect(page.getByRole('checkbox', { name: 'Pause on excursion' })).toBeDisabled()
     await switchTo(page, 'sample')
     await expect(page.getByText(/^Recorded · Paused$/)).toBeVisible()
-    await expect(frame(page)).toHaveText(/^1 of 60 /)
+    await expect(frame(page)).toHaveText(sampleFrame(1))
   })
 
   test('two browsers on live see the same frames; on the recording, their own', async ({ browser }) => {
@@ -113,8 +120,8 @@ test.describe('PMU test streamer', () => {
     await Promise.all([open(a), open(b)])
     await a.getByRole('button', { name: 'Step forward', exact: true }).click()
     await a.getByRole('button', { name: 'Step forward', exact: true }).click()
-    await expect(frame(a)).toHaveText(/^3 of 60 /)
-    await expect(frame(b)).toHaveText(/^1 of 60 /) // separate replays
+    await expect(frame(a)).toHaveText(sampleFrame(3))
+    await expect(frame(b)).toHaveText(sampleFrame(1)) // separate replays
     await Promise.all([switchTo(a, 'live'), switchTo(b, 'live')])
     const seen = { a: new Set<string>(), b: new Set<string>() }
     for (let i = 0; i < 40; i++) {
@@ -126,28 +133,61 @@ test.describe('PMU test streamer', () => {
     await Promise.all([a.close(), b.close()])
   })
 
-  test('the remote source: the recording from the remote data service', async ({ page }) => {
-    await open(page)
-    test.skip((await source(page).getByRole('button', { name: 'remote', exact: true }).count()) === 0, 'no remote source configured')
-    await switchTo(page, 'remote')
-    await expect(frame(page)).toHaveText(/^1 of 60 /)
-    await page.getByRole('button', { name: 'Play', exact: true }).click()
-    await expect(page.getByTestId('stats-readout')).toHaveText(/^mean f /)
-    await expect(frame(page)).not.toHaveText(/^1 of 60 /)
-  })
+  // Both read the remote data stub, and the second stops it: one after the other,
+  // or the second takes the stub away from the first part way.
+  test.describe('the remote source', () => {
+    test.describe.configure({ mode: 'serial' })
 
-  test('a provider that goes away stops the stream and says so', async ({ page }) => {
-    test.skip(!underCompose('remote-data-stub'), 'needs the compose stack as the server under test')
-    await open(page)
-    test.skip((await source(page).getByRole('button', { name: 'remote', exact: true }).count()) === 0, 'no remote source configured')
-    await switchTo(page, 'remote')
-    compose('stop remote-data-stub')
-    try {
-      await page.getByRole('slider', { name: 'Seek' }).fill('1')
-      await expect(page.getByRole('region', { name: 'Errors' })).toContainText('the stream from remote stopped')
-      await expect(page.getByText(/remote: ConnectionError/).first()).toBeVisible()
-    } finally {
-      compose('start remote-data-stub')
-    }
+    test('a year of history, moved around on the timeline', async ({ page }) => {
+      // The remote data stub serves synthetic-history: a year from 2025-10-01 at
+      // 20 Hz, with a 2.5 s dropout ten seconds in and three days missing from
+      // 2026-01-10 (modules/synthetic-history/).
+      await open(page)
+      test.skip((await source(page).getByRole('button', { name: 'remote', exact: true }).count()) === 0, 'no remote source configured')
+      await switchTo(page, 'remote')
+      await expect(page.getByTestId('coverage-readout')).toHaveText(
+        'Coverage 2025-10-01 00:00:00 → 2026-10-01 00:00:00 UTC · 365 d',
+      )
+      await expect(frame(page)).toHaveText('2025-10-01 00:00:00.000 UTC')
+      const tray = page.getByRole('region', { name: 'Errors' })
+      const jump = async (to: string) => {
+        await page.getByLabel('Jump to (UTC)').fill(to)
+        await page.getByRole('button', { name: 'Go', exact: true }).click()
+      }
+
+      // Into the 3-day outage: it lands on the first frame after it, and says so.
+      await jump('2026-01-11 00:00')
+      await expect(frame(page)).toHaveText('2026-01-13 00:00:00.000 UTC')
+      await expect(tray).toContainText('no data from remote for 2 d')
+
+      // A nudge, then the slider over a one-minute view, centred on the cursor.
+      await page.getByRole('button', { name: 'Forward 1 h', exact: true }).click()
+      await expect(frame(page)).toHaveText('2026-01-13 01:00:00.000 UTC')
+      await choose(page, 'View span', '1 min')
+      await page.getByRole('slider', { name: 'Seek' }).fill('45') // the view is [00:59:30, 01:00:30)
+      await expect(frame(page)).toHaveText('2026-01-13 01:00:15.000 UTC')
+
+      // Playing across the dropout crosses it at once and reports it.
+      await jump('2025-10-01 00:00:09.500')
+      await expect(frame(page)).toHaveText('2025-10-01 00:00:09.500 UTC')
+      await page.getByRole('button', { name: 'Play', exact: true }).click()
+      await expect(tray).toContainText('no data from remote for 2.50 s', { timeout: 5000 })
+      await expect(page.getByTestId('stats-readout')).toHaveText(/^mean f /)
+    })
+
+    test('a provider that goes away stops the stream and says so', async ({ page }) => {
+      test.skip(!underCompose('remote-data-stub'), 'needs the compose stack as the server under test')
+      await open(page)
+      test.skip((await source(page).getByRole('button', { name: 'remote', exact: true }).count()) === 0, 'no remote source configured')
+      await switchTo(page, 'remote')
+      compose('stop remote-data-stub')
+      try {
+        await page.getByRole('slider', { name: 'Seek' }).fill('1')
+        await expect(page.getByRole('region', { name: 'Errors' })).toContainText('the stream from remote stopped')
+        await expect(page.getByText(/remote: ConnectionError/).first()).toBeVisible()
+      } finally {
+        compose('start remote-data-stub')
+      }
+    })
   })
 })

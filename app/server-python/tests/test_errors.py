@@ -41,7 +41,7 @@ def test_a_refused_module_command_reaches_the_client_s_tray(server):
         server.websocket_connect("/api/errors/ws?client_id=401") as tray,
     ):
         page.receive_json()
-        body = {"source": "live", "offset_s": 0, "end_offset_s": 1}
+        body = {"source": "live", "start": "2026-01-01T00:00:00Z", "end": "2026-01-01T00:00:01Z"}
         ack = server.post("/api/pmu-test-streamer/summary?client_id=401", json=body).json()
         notice = tray.receive_json()
     assert (notice["app"], notice["source"]) == ("pmu-test-streamer", "range-summary")

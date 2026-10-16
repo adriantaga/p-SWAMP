@@ -5,7 +5,7 @@
 
     GET  /healthz                         200 {status}
     GET  /v1/coverage?model=pmu.frame     200 {model, start, end} | 404 unknown model
-    POST /v1/queries   RemoteDataQuery    200 NDJSON: record lines, then one end or error line
+    POST /v1/queries   RemoteDataQuery    200 NDJSON: record lines (at most ``limit``), then one end or error line
 
 A client that closes the connection has cancelled: Starlette stops the
 generator where it stands.
@@ -64,13 +64,15 @@ def create_app(source: SourceModule) -> FastAPI:
 
     async def answer(query: RemoteDataQuery) -> AsyncIterator[bytes]:
         sent = 0
-        logger.info("query %s: %s [%s, %s)", query.query_id, query.model, query.start, query.end)
+        logger.info("query %s: %s [%s, %s) limit %s", query.query_id, query.model, query.start, query.end, query.limit)
         stream = None
         try:
             stream = await sources.consume(query.start, query.end)
             async for record in stream:
                 yield RemoteDataResult.for_record(record).to_line()
                 sent += 1
+                if sent == query.limit:
+                    break  # a page: the client asks again from after this record
         except Exception as error:  # past the first byte a failure is a line
             yield RemoteDataResult(kind="error", error=f"{type(error).__name__}: {error}").to_line()
             return

@@ -23,11 +23,15 @@ named `remote`; a script passes keywords):
 | `url` | required | Base URL of the service, `http://remote-data:8100` |
 | `timeout` | `30` | Seconds to wait for an answer to start, and for each line |
 | `coverage_timeout` | `10` | Seconds to wait for the coverage, which a seek and a switch to this source wait on |
+| `page` | `30000` | Records per query; a full page is followed by the next |
+| `gap` | `1` | Seconds without frames that the player crosses at once and reports (every playable source has it) |
 
 `coverage` is `GET /v1/coverage?model=pmu.frame`; `read` is `POST /v1/queries`,
-whose NDJSON answer is read a line at a time, so closing the stream early (a
-seek) closes the connection, which is the service's cue to stop. A paused replay
-reads nothing and is not timed out.
+a page of at most `page` records at a time, whose NDJSON answer is read a line
+at a time, so closing the stream early (a seek) closes the connection, which is
+the service's cue to stop. A full page is followed by a query from one
+microsecond after its last record, so a gap of weeks costs one query. A paused
+replay reads nothing and is not timed out.
 
 ## From a script
 
@@ -43,8 +47,8 @@ print(source.coverage())
 frames = list(source.read(start, end))
 ```
 
-An `httpx` client is made per call and closed at its end, so the source holds
-no connection between reads.
+An `httpx` client is made per call (one `read`, all its pages) and closed at
+its end, so the source holds no connection between reads.
 
 ## Examples
 
@@ -56,6 +60,8 @@ no connection between reads.
 The remote data stub (`examples/remote_data_stub/`, `python -m remote_data_stub` with
 `examples/` on the `PYTHONPATH`) is a service to try it against: it serves the records of any
 history source, `sample-replay` by default (`REMOTE_DATA_STUB_SOURCE=name:entry-point`).
+Compose and k8s run it with `history:synthetic-history`: a year with outages, as
+a long-term store would hold.
 
 ## Tests
 

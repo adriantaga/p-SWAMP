@@ -37,6 +37,14 @@ back to this source; ``speed`` and ``loop`` carry over, the stream restarts.
   counts them: the start, a seek, a step back, a loop to the start and a play
   after the end each open one, and a run resets its modules on each.
 - **Pacing drops time rather than bursting** when the loop falls behind.
+- **A gap is crossed at once, and reported.** When the next frame lies more
+  than ``GAP`` seconds (``{SOURCE}_GAP``, default 1; at least two frame
+  intervals) past the cursor, it is due now, not after the gap, and an
+  ``ErrorEvent`` says where the data stops and starts again. A seek that lands
+  in a gap reports it the same way, and so does a chunk with no data at all.
+  Every gap is logged; the tray gets at most one report per
+  ``GAP_REPORT_EVERY_S`` (the first of each stream always), with the gaps in
+  between counted into the next.
 - **A provider failure stops the stream**: paused, ``error`` set in the
   status, and an ``ErrorEvent`` published. Play or seek tries again.
 
@@ -48,8 +56,9 @@ commands, which ``ahandle`` queues for it. So nothing here needs a lock.
 
 The mixin keeps its state in ``speed``, ``paused``, ``ended``, ``error``,
 ``cursor``, ``last_frame``, ``loop``, ``streams`` and attributes prefixed ``_pl_``: names a
-source class using it should not reuse. It needs from its host class what a
-``SourceModule`` has: ``source``, ``kind``, ``aread``, ``acoverage``, and
+source class using it should not reuse. It adds the ``GAP`` setting to the
+class's ``env_settings``. It needs from its host class what a
+``SourceModule`` has: ``source``, ``kind``, ``settings``, ``aread``, ``acoverage``, and
 ``_ensure_open``. It reads the source through a ``SourceStream``, so the
 frames are guarded and enriched the same way a ``SourceSet`` does.
 """
@@ -78,6 +87,7 @@ from .command_routing import CommandRefused
 from .enrich import Enricher
 from .time_range import TimeRange
 from .log import get_logger
+from .settings import EnvSetting
 from .sources import SourceStream
 from .util.tasks import cancel_and_wait
 from .util.time import utcnow
@@ -87,12 +97,19 @@ if TYPE_CHECKING:
 
     from .subscription import Sink
 
-__all__ = ["PLAYBACK_COMMANDS", "Playable"]
+__all__ = ["GAP_REPORT_EVERY_S", "GAP_SETTING", "PLAYBACK_COMMANDS", "Playable"]
 
 logger = get_logger("pswamp_core.playable")
 
 #: The commands a playable source handles.
 PLAYBACK_COMMANDS: tuple[type[Command], ...] = (PlayCommand, PauseCommand, StepCommand, SeekCommand, SpeedCommand)
+
+#: The setting every playable source gets: how long a stretch without frames
+#: is a gap, crossed at once and reported.
+GAP_SETTING = EnvSetting("GAP", "Seconds without frames that are a gap: crossed at once, and reported", default="1", kind="seconds")
+
+#: At most one gap report on the tray per this many seconds of wall clock.
+GAP_REPORT_EVERY_S = 5.0
 
 _END = object()
 
@@ -115,11 +132,18 @@ class Playable:
     streams: int = 0
 
     _pl_task: asyncio.Task | None = None
+    _pl_interval: float | None = None
+    #: When the last gap went to the tray (``time.monotonic``), and how many since.
+    _pl_gap_reported: float | None = None
+    _pl_gaps_held: int = 0
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not cls.__dict__.get("abstract", False) and getattr(cls, "kind", None) != "history":
             raise TypeError(f"{cls.__name__}: only a history source can be Playable, not kind={getattr(cls, 'kind', None)!r}")
+        settings = tuple(getattr(cls, "env_settings", ()))
+        if not any(setting.setting == GAP_SETTING.setting for setting in settings):
+            cls.env_settings = (*settings, GAP_SETTING)
 
     # -- state ---------------------------------------------------------------------
 
@@ -204,9 +228,11 @@ class Playable:
         if needs_coverage and coverage is None:
             raise CommandRefused(f"cannot {command.name}: the source reports nothing to seek in")
         if isinstance(command, SeekCommand):
-            start, end = coverage.start, coverage.end
-            if start + timedelta(seconds=command.offset_s) >= end:
-                raise CommandRefused(f"offset {command.offset_s}s lies past the end of the recording")
+            # Before the start is fine: the seek lands on the first frame.
+            if coverage.end is not None and command.at >= coverage.end:
+                raise CommandRefused(f"{_utc(command.at)} UTC lies past the end of the recording, {_utc(coverage.end)} UTC")
+            if command.until is not None and command.until <= coverage.start:
+                raise CommandRefused(f"the chunk ends at {_utc(command.until)} UTC, before the recording starts")
 
     async def ahandle(self, command: Command) -> None:
         """Queue ``command`` for the task, and wait until it is applied. It is
@@ -232,9 +258,7 @@ class Playable:
         elif isinstance(command, StepCommand):
             await self._pl_step(command.n)
         elif isinstance(command, SeekCommand):
-            base = self._pl_coverage.start
-            end = None if command.end_offset_s is None else base + timedelta(seconds=command.end_offset_s)
-            await self._pl_open(base + timedelta(seconds=command.offset_s), end)
+            await self._pl_open(command.at, command.until)
             self.paused = self.paused and not command.play
             await self._pl_show_if_paused()
         self._pl_anchor = None
@@ -308,6 +332,7 @@ class Playable:
         self.streams += 1
         self.error, self.ended, self.last_frame = None, False, None
         self._pl_anchor, self._pl_played_since_open, self._pl_range_end = None, False, None
+        self._pl_gap_reported, self._pl_gaps_held = None, 0  # the first gap of a stream always shows
         try:
             await self._ensure_open()
             self._pl_coverage = await self.acoverage()
@@ -352,6 +377,8 @@ class Playable:
         if frame is not _END:
             self._pl_played_since_open = True
             return frame
+        if not self._pl_played_since_open and self.cursor is not None:  # a range with no data at all
+            self._pl_report_gap(self.cursor, self._pl_range_end or self._pl_coverage.end, empty=True)
         if self.loop and self._pl_range_end is None and self._pl_played_since_open:
             await self._pl_open()
         else:
@@ -379,11 +406,12 @@ class Playable:
     # -- pacing and publishing -----------------------------------------------------
 
     def _pl_due(self, frame: DataModel) -> float:
-        """Seconds until ``frame`` is due; 0 for the first after a change."""
+        """Seconds until ``frame`` is due; 0 for the first after a change, and
+        for the first after a gap."""
         if frame.timestamp is None:
             return 0.0
         now = time.monotonic()
-        if self._pl_anchor is None:
+        if self._pl_anchor is None or self._pl_gap(frame) is not None:
             self._pl_anchor = (frame.timestamp, now)
             return 0.0
         anchor_at, anchor_now = self._pl_anchor
@@ -394,12 +422,45 @@ class Playable:
         return delay
 
     def _pl_emit(self, frame: DataModel) -> None:
+        if self._pl_gap(frame) is not None:
+            self._pl_report_gap(self.cursor, frame.timestamp)
         header = getattr(frame, "header", None)
         if header is not None:
             self._pl_interval = 1.0 / header.data_rate
         self.cursor = frame.timestamp
         self.last_frame = frame
         self._pl_sink.publish(frame)
+
+    # -- gaps ----------------------------------------------------------------------
+
+    def _pl_gap(self, frame: DataModel) -> timedelta | None:
+        """How far ``frame`` lies past the cursor, when that is a gap: more than
+        ``GAP``, and more than two frame intervals."""
+        if self.cursor is None or frame.timestamp is None:
+            return None
+        jump = frame.timestamp - self.cursor
+        threshold = max(self.settings.gap.total_seconds(), 2 * (self._pl_interval or 0.0))
+        return jump if jump.total_seconds() > threshold else None
+
+    def _pl_report_gap(self, start: datetime, end: datetime, *, empty: bool = False) -> None:
+        """Log a gap, and report it on the tray unless one was reported less
+        than ``GAP_REPORT_EVERY_S`` ago; then it is counted into the next."""
+        where = f"{_utc(start)} to {_utc(end)} UTC"
+        message = (
+            f"no data from {self.source} in the range asked for"
+            if empty
+            else f"no data from {self.source} for {_span(end - start)}"
+        )
+        logger.warning("%s: %s", message, where)
+        now = time.monotonic()
+        if self._pl_gap_reported is not None and now - self._pl_gap_reported < GAP_REPORT_EVERY_S:
+            self._pl_gaps_held += 1
+            return
+        held, self._pl_gaps_held, self._pl_gap_reported = self._pl_gaps_held, 0, now
+        detail = where if empty else f"{where}; playback went straight on to the next frame"
+        if held:
+            detail += f" (and {held} more {'gap' if held == 1 else 'gaps'} since the last report)"
+        self._pl_sink.publish(ErrorEvent(timestamp=utcnow(), source="player", message=message, detail=detail))
 
     def _pl_fail(self, error: BaseException) -> None:
         self.error = f"{self.source}: {type(error).__name__}: {error}"
@@ -414,6 +475,22 @@ class Playable:
 
     def _pl_publish_status(self) -> None:
         self._pl_sink.publish(self.status())
+
+
+def _utc(moment: datetime) -> str:
+    """``2026-03-14 13:05:00.040``: to the millisecond."""
+    return moment.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _span(span: timedelta) -> str:
+    """``2.50 s`` under a minute; ``2 d 19 h 55 min`` above."""
+    seconds = span.total_seconds()
+    if seconds < 60:
+        return f"{seconds:.2f} s"
+    days, rest = divmod(round(seconds), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    return " ".join(f"{value} {unit}" for value, unit in ((days, "d"), (hours, "h"), (minutes, "min"), (secs, "s")) if value)
 
 
 async def _read_one(stream: SourceStream) -> DataModel | object:

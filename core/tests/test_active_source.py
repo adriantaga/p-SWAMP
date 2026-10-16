@@ -107,7 +107,7 @@ async def test_playback_commands_go_to_the_active_playable():
     await command(router, PlayCommand())
     await until(lambda: len(frames(out)) >= 5)
     await command(router, PauseCommand())
-    await command(router, SeekCommand(offset_s=0.5))
+    await command(router, SeekCommand(at=at(0.5)))
     assert (router.status().cursor, frames(out)[-1], router.status().paused) == (at(0.5), at(0.5), True)
     await router.stop()
 
@@ -115,12 +115,12 @@ async def test_playback_commands_go_to_the_active_playable():
 async def test_what_does_not_apply_is_refused():
     router, _ = await running(ListSource("rec"), TickingSource("live"))
     with pytest.raises(CommandRefused, match="lies past the end"):
-        router.validate(SeekCommand(offset_s=5))  # the recording is one second long
+        router.validate(SeekCommand(at=at(5)))  # the recording is one second long
     with pytest.raises(CommandRefused) as unknown:
         router.validate(SwitchSourceCommand(source="nope"))
     assert str(unknown.value) == "no source named 'nope'; the sources are ['rec', 'live']"
     await command(router, SwitchSourceCommand(source="live"))
-    for cmd in (PlayCommand(), PauseCommand(), StepCommand(), SeekCommand(offset_s=0), SpeedCommand(speed=2)):
+    for cmd in (PlayCommand(), PauseCommand(), StepCommand(), SeekCommand(at=at(0)), SpeedCommand(speed=2)):
         with pytest.raises(CommandRefused) as refused:
             router.validate(cmd)
         assert str(refused.value) == f"{cmd.name} does not apply to a live source"

@@ -15,10 +15,11 @@ pushes one ``PmuStreamState`` on connect and after every change.
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, FastAPI, WebSocket
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from shared import (
     COMMAND_RESPONSES,
     ClientId,
@@ -74,8 +75,6 @@ class PmuStreamState(BaseModel):
     frame: PmuFrame | None = Field(description="The frame at the cursor, with its layout.")
     player: PlayerStatus = Field(description="Where the player is and which controls apply.")
     stats: FrameStatsResult | None = Field(description="The frame statistics for (about) that frame.")
-    frame_index: int | None = Field(description="0-based position of the frame in the recording; null when live.")
-    frame_count: int | None = Field(description="Frames in the recording; null when live.")
     excursion: ExcursionResult | None = Field(description="The excursion module's latest result.")
     summary: RangeSummaryResult | None = Field(description="The answer to this client's last range summary.")
 
@@ -83,17 +82,10 @@ class PmuStreamState(BaseModel):
 def state_message(run: PipelineRun) -> PmuStreamState:
     status = run.status()
     frame = run.frame if isinstance(run.frame, PmuFrame) else None
-    index = count = None
-    if frame is not None and status.mode == "replay" and status.coverage_start and status.coverage_end:
-        interval = 1.0 / frame.header.data_rate
-        index = round((frame.timestamp - status.coverage_start).total_seconds() / interval)
-        count = round((status.coverage_end - status.coverage_start).total_seconds() / interval)
     return PmuStreamState(
         frame=frame,
         player=status,
         stats=_about(run.latest.get(FrameStatsResult), frame),
-        frame_index=index,
-        frame_count=count,
         excursion=run.latest.get(ExcursionResult),
         summary=run.latest.get(RangeSummaryResult),
     )
@@ -141,14 +133,20 @@ async def step(client_id: ClientId, body: StepBody) -> CommandAck:
 
 
 class SeekBody(BaseModel):
-    offset_s: float = Field(ge=0, description="Seconds from the start of the recording.")
-    end_offset_s: float | None = Field(default=None, gt=0, description="Stop here: play a chunk.")
+    at: datetime = Field(description="The instant to go to, UTC; the first frame at or after it is shown.")
+    until: datetime | None = Field(default=None, description="Stop here, exclusive, UTC: play a chunk.")
     play: bool = Field(default=False, description="Also start playing.")
+
+    @model_validator(mode="after")
+    def _until_after_at(self) -> SeekBody:
+        if self.until is not None and self.until <= self.at:
+            raise ValueError("until must be after at")  # a 422 here, not a 500 from SeekCommand
+        return self
 
 
 @router.post("/playback/seek", operation_id="pmu_test_streamer_seek", responses=COMMAND_RESPONSES)
 async def seek(client_id: ClientId, body: SeekBody) -> CommandAck:
-    """Move to an offset into the recording; with an end, play only that chunk."""
+    """Go to an instant in the recording; with an end, play only that chunk."""
     return dispatch(SeekCommand(client_id=client_id, **body.model_dump()))
 
 
@@ -188,8 +186,8 @@ async def auto_pause(client_id: ClientId, body: AutoPauseBody) -> CommandAck:
 
 class SummaryBody(BaseModel):
     source: str = Field(description="The recording to read: one of PlayerStatus.sources.")
-    offset_s: float = Field(ge=0, description="Seconds from the start of the recording.")
-    end_offset_s: float = Field(gt=0, description="Exclusive end, in seconds from the start.")
+    start: datetime = Field(description="Inclusive start, UTC.")
+    end: datetime = Field(description="Exclusive end, UTC.")
 
 
 @router.post("/summary", operation_id="pmu_test_streamer_summary", responses=COMMAND_RESPONSES)

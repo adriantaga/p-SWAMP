@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -16,8 +17,8 @@ __all__ = ["RangeSummary", "RangeSummaryResult"]
 
 class RangeSummary(BaseModel):
     source: str
-    offset_s: float
-    end_offset_s: float
+    start: datetime = Field(description="The range summarized: inclusive start, UTC.")
+    end: datetime = Field(description="Exclusive end, UTC.")
     frames: int = Field(description="Frames in the range.")
     min_frequency_hz: float
     max_frequency_hz: float
@@ -25,4 +26,4 @@ class RangeSummary(BaseModel):
 
 
 class RangeSummaryResult(ResultEnvelope[RangeSummary]):
-    version: Literal["v1"] = "v1"
+    version: Literal["v2"] = "v2"

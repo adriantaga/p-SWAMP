@@ -124,8 +124,8 @@ class ListSource(Playable, SourceModule):
     name = "list-source"
     kind = "history"
 
-    def __init__(self, source: str = "list", frames=None) -> None:
-        super().__init__(source)
+    def __init__(self, source: str = "list", frames=None, **settings) -> None:
+        super().__init__(source, **settings)
         self.frames = list(frames if frames is not None else [frame(i / 20) for i in range(20)])
         self.opened = self.closed = 0
 
