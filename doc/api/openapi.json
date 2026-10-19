@@ -1371,8 +1371,8 @@
             "$ref": "#/components/schemas/LiveSamples"
           },
           "type": {
-            "const": "live",
-            "default": "live",
+            "const": "state",
+            "default": "state",
             "title": "Type",
             "type": "string"
           }
