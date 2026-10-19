@@ -38,6 +38,6 @@ class LiveFeed(BaseModel):
     Nothing is merged or skipped: a push carries as many frames as came while the last one was
     being sent, so under load the pushes get fewer and larger, and no frame is lost."""
 
-    type: Literal["live"] = "live"
+    type: Literal["state"] = "state"
     layout: LiveLayout | None = Field(default=None, description="The stations, when they are new.")
     samples: LiveSamples
