@@ -112,7 +112,15 @@ class PeakFrequencyModule(Module):
 - The layout is in `frame.header`. A module that derives something from it
   (column indexes) re-derives it when `frame.header.header_id` changes; the
   streamer's `frame_stats/module.py` does.
-- The CIM reference for the frame is `frame.header.cimReferenceId`.
+- The CIM reference for the frame is `frame.header.cimReferenceId`, and the CIM
+  Analog of column `i` is `frame.header.analog[i]` (when the pipeline ties frames to
+  the graph). To read the grid, set `cim = True` and depend on `pswamp-core[cim]`:
+  `self.cim_repo` is a LazyCIM repository of the instance's own, which reads and never
+  writes (only the web backend writes the graph), and keeps what it read until the
+  graph changes: `self.cim_version.changed()` says when, and
+  `pswamp_core.cim.refresh_expired(self.cim_repo)` makes the next read re-read only
+  what changes. `self.cim_repo.from_mRID(frame.header.analog[i]).Terminal.ConnectivityNode`
+  goes from a column to the grid.
 - A result class is a `ResultEnvelope[Body]` subclass with
   `version: Literal["v1"] = "v1"`. Its name is its topic
   (`PeakFrequencyResult` → `peak.frequency.result`), and the browser's type is
@@ -228,8 +236,8 @@ module = "live-synthetic"
 A source is a module too (a `SourceModule`, which is a `Module` with no inputs), named by its entry point.
 `PEAK_FREQUENCY_SOURCES` (`name:entry-point,...`), when set,
 replaces the `[[sources]]` list, and each source reads its own
-`{NAME}_{SETTING}` variables (`LIVE_PATH` for the source named `live`). An `[enrich]` table with `cim_reference = "..."`
-sets a CIM reference on every frame (the streamer's file has one).
+`{NAME}_{SETTING}` variables (`LIVE_PATH` for the source named `live`). An `[enrich]` table with `cim = true`
+ties every frame to the CIM graph: its model id, and the Analog of each column (the streamer's file has one).
 `uv run pswamp pipelines validate` loads the file as the server does and says
 what is wrong with it: a module that is not installed, or one that reads a
 class nothing in the pipeline produces.
