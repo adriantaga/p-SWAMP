@@ -54,7 +54,8 @@ export function PmuTestStreamerPage() {
         <CardTitle className="text-lg">PMU Test Streamer</CardTitle>
         <span className="text-gray-500">
           A PMU source through the core pipeline: source → frame statistics →
-          excursion, with a range summary on request.
+          excursion, with a range summary on request. E2E example and used for integration testing. <em> Do not use this page to do p-SWAMP experiments; use <code>pswamp new subapp</code> to generate a new
+          page/subapp instead. 🙂</em>
         </span>
         <CardAction className="self-center">
           {connected && live ? (
