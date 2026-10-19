@@ -28,7 +28,7 @@ def server(monkeypatch):
 def test_the_feed_says_its_stations_first(server):
     with server.websocket_connect("/api/cim-live/ws?client_id=601") as ws:
         first = ws.receive_json()
-    assert first["type"] == "live" and first["layout"] is not None
+    assert first["type"] == "state" and first["layout"] is not None  # what useServerSocket passes on
     stations = first["layout"]["stations"]
     assert {s["name"] for s in stations} == {"Alpha_400", "Beta_400", "Gamma_132", "Gamma_400"}
     assert all(s["substation"] and s["kv"] for s in stations)  # tied to the CIM graph
