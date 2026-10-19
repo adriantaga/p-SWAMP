@@ -1176,10 +1176,10 @@ export interface components {
             samples: components["schemas"]["LiveSamples"];
             /**
              * Type
-             * @default live
+             * @default state
              * @constant
              */
-            type: "live";
+            type: "state";
         };
         /**
          * LiveLayout
