@@ -195,8 +195,8 @@ class ConfiguredSources:
         return classes
 
     def source_models(self) -> tuple[type[DataModel], ...]:
-        """What the sources serve (each class's ``model``), without building one."""
-        return tuple(dict.fromkeys(cls.model for _, cls in self.source_classes()))
+        """What the sources serve (every class of their ``outputs``), without building one."""
+        return tuple(dict.fromkeys(model for _, cls in self.source_classes() for model in cls.outputs))
 
     def __call__(self) -> SourceSet:
         reference = os.environ.get(self.cim_variable, "").strip() or self.cim_reference
