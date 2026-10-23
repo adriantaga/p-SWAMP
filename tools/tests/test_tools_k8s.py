@@ -111,7 +111,11 @@ def test_every_pod_reads_its_hosts(rendered):
             used = {
                 var
                 for env in container.get("env", [])
-                for var in ("PSWAMP_KAFKA_HOST", "PSWAMP_REMOTE_DATA_HOST")
+                for var in (
+                    "PSWAMP_KAFKA_HOST",
+                    "PSWAMP_REMOTE_DATA_HOST",
+                    "PSWAMP_OXIGRAPH_HOST",
+                )
                 if f"$({var})" in str(env.get("value", ""))
             }
             if used:
@@ -129,7 +133,7 @@ def test_overlay_sets_every_p_swamp_image(rendered):
     for deployment, spec in _pod_specs(rendered).items():
         for container in spec["containers"]:
             assert container["image"] == IMAGE or container["image"].startswith(
-                "apache/kafka:"
+                ("apache/kafka:", "ghcr.io/oxigraph/oxigraph:")
             ), (
                 f"{deployment}/{container['name']}: {container['image']} (name the image p-swamp)"
             )
