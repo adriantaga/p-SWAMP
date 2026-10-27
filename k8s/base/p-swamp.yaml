@@ -9,9 +9,10 @@
 #   p-swamp-batch-worker      the range summary, with its own CPU limit
 #   p-swamp-remote-data-stub  a year of synthetic history behind the remote data contract
 #   p-swamp-kafka             the broker between the server and the workers
+#   p-swamp-oxigraph          the CIM graph store, in memory, which the server loads the grid into
 #   p-swamp-hosts             the ConfigMap naming the Services above that pods connect to
 #
-# All the same image except Kafka. The workers and the stub run from modules/,
+# All the same image except Kafka and Oxigraph. The workers and the stub run from modules/,
 # not the server's src/. Every Deployment has one replica and the
 # Recreate strategy: the server holds its runs in memory, and a worker has no
 # consumer group, so a second replica would split clients or answer every
@@ -73,8 +74,7 @@ spec:
           ports:
             - name: http
               containerPort: 8000
-          # PSWAMP_KAFKA_HOST, PSWAMP_REMOTE_DATA_HOST,
-          # PSWAMP_OXIGRAPH_HOST: see p-swamp-hosts at the end.
+          # PSWAMP_KAFKA_HOST, PSWAMP_REMOTE_DATA_HOST, PSWAMP_OXIGRAPH_HOST: see p-swamp-hosts at the end.
           envFrom:
             - configMapRef:
                 name: p-swamp-hosts
@@ -190,8 +190,7 @@ spec:
           # pipelines/ (copied into the image at the repo path), so
           # PSWAMP_WORKER_PIPELINES names the files there.
           workingDir: /workspace/p-SWAMP/pipelines
-          # PSWAMP_KAFKA_HOST, PSWAMP_REMOTE_DATA_HOST,
-          # PSWAMP_OXIGRAPH_HOST: see p-swamp-hosts at the end.
+          # PSWAMP_KAFKA_HOST, PSWAMP_REMOTE_DATA_HOST, PSWAMP_OXIGRAPH_HOST: see p-swamp-hosts at the end.
           envFrom:
             - configMapRef:
                 name: p-swamp-hosts
@@ -251,8 +250,7 @@ spec:
               drop: [ALL]
           command: ["python", "-m", "pswamp_core.worker"]
           workingDir: /workspace/p-SWAMP/pipelines
-          # PSWAMP_KAFKA_HOST, PSWAMP_REMOTE_DATA_HOST,
-          # PSWAMP_OXIGRAPH_HOST: see p-swamp-hosts at the end.
+          # PSWAMP_KAFKA_HOST, PSWAMP_REMOTE_DATA_HOST, PSWAMP_OXIGRAPH_HOST: see p-swamp-hosts at the end.
           envFrom:
             - configMapRef:
                 name: p-swamp-hosts
@@ -467,18 +465,6 @@ spec:
       port: 9092
       targetPort: 9092
 ---
-# Overlays: the only place a Service's name is written as a value. A new entry
-# also needs a replacement in k8s/components/hosts. See "Environment variables"
-# in k8s/README.md.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: p-swamp-hosts
-data:
-  PSWAMP_KAFKA_HOST: p-swamp-kafka
-  PSWAMP_REMOTE_DATA_HOST: p-swamp-remote-data-stub
-  PSWAMP_OXIGRAPH_HOST: p-swamp-oxigraph
----
 # Oxigraph, in memory: the store of the CIM graph. No volume: the server loads the grid into
 # the empty store when it starts, so a restart puts every edit back, like the rest of the
 # stack. Plain SPARQL 1.1 (queries at /query, updates at /update); --union-default-graph
@@ -501,9 +487,21 @@ spec:
       labels:
         app: p-swamp-oxigraph
     spec:
+      # The image is distroless and declares no USER, so it would run as root;
+      # 65532 is distroless's "nonroot". In memory (no --location), it writes nothing.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: oxigraph
           image: ghcr.io/oxigraph/oxigraph:0.5.2
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            capabilities:
+              drop: [ALL]
           args: ["serve", "--bind", "0.0.0.0:7878", "--union-default-graph"]
           ports:
             - name: http
@@ -535,3 +533,15 @@ spec:
       protocol: TCP
       port: 7878
       targetPort: 7878
+---
+# Overlays: the only place a Service's name is written as a value. A new entry
+# also needs a replacement in k8s/components/hosts. See "Environment variables"
+# in k8s/README.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: p-swamp-hosts
+data:
+  PSWAMP_KAFKA_HOST: p-swamp-kafka
+  PSWAMP_REMOTE_DATA_HOST: p-swamp-remote-data-stub
+  PSWAMP_OXIGRAPH_HOST: p-swamp-oxigraph
